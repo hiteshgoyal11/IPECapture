@@ -1,12 +1,14 @@
 "use client";
 
-import Step2Credentials from "./components/step-2-credentials";
 import React, { useState } from "react";
 import Link from "next/link";
 import StepIndicator from "./components/step-indicator";
 import Step1NameDob from "./components/step-1-name-dob";
 import { SignupFormData } from "./types";
+import Step2Credentials from "./components/step-2-credentials";
 import Step3CourseBranch from "./components/step-3-course-branch";
+import Step4Username from "./components/step-4-username";
+import Step5Avatar from "./components/step-5-avatar";
 
 export default function SignupWizardPage() {
   const [currentStep, setCurrentStep] = useState(1);
@@ -76,18 +78,21 @@ export default function SignupWizardPage() {
             />
           )}
 
-          {/* Placeholder for remaining steps (4 & 5) */}
-          {currentStep > 3 && (
-            <div className="text-center py-8 space-y-3">
-              <p className="text-sm font-semibold">Step {currentStep} is ready for code.</p>
-              <button
-                type="button"
-                onClick={prevStep}
-                className="text-xs text-zinc-500 underline"
-              >
-                Go back
-              </button>
-            </div>
+          {/* STEP 4: Username Selection */}
+          {currentStep === 4 && (
+            <Step4Username
+              formData={formData}
+              updateFormData={updateFormData}
+              onNext={nextStep}
+            />
+          )}
+
+          {/* STEP 5: Avatar & Profile Setup (Final Step) */}
+          {currentStep === 5 && (
+            <Step5Avatar
+              formData={formData}
+              updateFormData={updateFormData}
+            />
           )}
 
         </div>

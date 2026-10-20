@@ -54,7 +54,7 @@ export default function LandingPage() {
     };
   }, []);
 
-  // Login Handler (Connected to Supabase Auth)
+  // Smart Login: Supports BOTH Email OR Username
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
@@ -62,8 +62,26 @@ export default function LandingPage() {
     setSuccessMessage("");
 
     try {
+      const input = email.trim(); // Yeh input username bhi ho sakta hai ya email bhi
+      let authEmail = input;
+
+      // Agar input me '@' nahi hai, iska matlab student ne Username enter kiya hai
+      if (!input.includes("@")) {
+        const { data: profile, error: profileErr } = await supabase
+          .from("profiles")
+          .select("email")
+          .eq("username", input.toLowerCase())
+          .maybeSingle();
+
+        if (profileErr || !profile?.email) {
+          throw new Error("No account found with this username.");
+        }
+        authEmail = profile.email;
+      }
+
+      // Supabase Auth Login
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
+        email: authEmail,
         password: password,
       });
 
@@ -71,10 +89,10 @@ export default function LandingPage() {
 
       if (data.user) {
         setSuccessMessage("Logged in successfully! Redirecting...");
-        window.location.href = "/resources";
+        window.location.href = "/feed";
       }
     } catch (err: any) {
-      setErrorMessage(err.message || "Invalid email or password.");
+      setErrorMessage(err.message || "Invalid credentials. Please check your username/email and password.");
     } finally {
       setIsLoading(false);
     }
@@ -284,14 +302,14 @@ export default function LandingPage() {
               {/* Form Switching: Login vs Sign Up */}
               <form onSubmit={handleLogin} className="space-y-3.5">
 
-                {/* Email Input */}
+                {/* Username or Email Input */}
                 <div>
                   <input
-                    type="email"
+                    type="text"
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="Email address (Gmail / Personal)"
+                    placeholder="Username or email"
                     className="w-full text-xs sm:text-sm px-3.5 py-3 rounded-xl border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-zinc-950 dark:text-zinc-100 placeholder:text-zinc-400 dark:placeholder:text-zinc-600 focus:outline-none focus:ring-1 focus:ring-black dark:focus:ring-white transition"
                   />
                 </div>
