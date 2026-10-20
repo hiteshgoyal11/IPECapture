@@ -277,7 +277,10 @@ import {
   X, 
   WifiOff,
   Sparkles,
-  Loader2
+  Loader2,
+  ChevronLeft, 
+  ChevronRight, 
+  Share2
 } from "lucide-react";
 import LeftSidebar from "./components/left-sidebar";
 import RightSidebar from "./components/right-sidebar";
@@ -294,6 +297,7 @@ interface Story {
   media_url: string;
   caption?: string;
   created_at: string;
+  likes_count?: number;
 }
 
 export default function MainFeedPage() {
@@ -314,9 +318,98 @@ export default function MainFeedPage() {
   const [newPostCaption, setNewPostCaption] = useState("");
   const [isPosting, setIsPosting] = useState(false);
 
-  // Story Viewer Modal State
-  const [activeStory, setActiveStory] = useState<Story | null>(null);
+  // Multi-Story & Instagram Status Progress States
+  const [activeStoryUsername, setActiveStoryUsername] = useState<string | null>(null);
+  const [currentStoryIndex, setCurrentStoryIndex] = useState(0);
+  const [storyProgress, setStoryProgress] = useState(0);
+  const [storyReplyText, setStoryReplyText] = useState("");
+  const [isStoryLiked, setIsStoryLiked] = useState(false);
+  const [storyViewers, setStoryViewers] = useState<any[]>([]);
+  const [isViewersSheetOpen, setIsViewersSheetOpen] = useState(false);
   const storyInputRef = useRef<HTMLInputElement>(null);
+
+  // 1. Pehle Grouping aur currentStory calculate karo
+  const storiesByUser = stories.reduce((acc: Record<string, Story[]>, s) => {
+    if (!acc[s.author_username]) acc[s.author_username] = [];
+    acc[s.author_username].push(s);
+    return acc;
+  }, {});
+
+  const currentActiveUserStories = activeStoryUsername ? storiesByUser[activeStoryUsername] || [] : [];
+  const currentStory = currentActiveUserStories[currentStoryIndex] || null;
+
+  // 2. Ab currentStory define ho chuka hai, to isOwnStory check karo
+  const isOwnStory = currentStory?.author_username === currentUser?.username;
+
+  // Comments Sheet & Timer Pause States
+  const [isCommentsSheetOpen, setIsCommentsSheetOpen] = useState(false);
+  const [storyComments, setStoryComments] = useState<any[]>([]);
+  const [ownerReplyInput, setOwnerReplyInput] = useState("");
+
+  // Share Sheet State taaki Share par bhi timer ruke
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+
+  // Timer Freeze Condition: View, Comment, ya Share khula ho to timer 100% rukega
+  const isTimerPaused = isViewersSheetOpen || isCommentsSheetOpen || isShareModalOpen;
+
+  // 1. Progress sirf tab 0 hoga jab nayi story aayegi (Pause hone par 0 nahi hoga)
+  useEffect(() => {
+    setStoryProgress(0);
+  }, [activeStoryUsername, currentStoryIndex]);
+
+  // 2. Slow & Smooth 12-Second Timer (Freeze on Pause)
+  useEffect(() => {
+    if (!activeStoryUsername || !currentStory || isTimerPaused) return;
+
+    const interval = setInterval(() => {
+      setStoryProgress((prev) => {
+        if (prev >= 100) {
+          if (currentStoryIndex < currentActiveUserStories.length - 1) {
+            setCurrentStoryIndex((i) => i + 1);
+            return 0;
+          } else {
+            setActiveStoryUsername(null);
+            setCurrentStoryIndex(0);
+            return 0;
+          }
+        }
+        // 50ms me 0.42% -> Exactly ~12 Seconds (Slow & Calm)
+        return prev + 0.42;
+      });
+    }, 50);
+
+    return () => clearInterval(interval);
+  }, [activeStoryUsername, currentStoryIndex, currentActiveUserStories.length, isTimerPaused]);
+
+  // Record View & Fetch Viewers with Likes for Own Story
+  useEffect(() => {
+    if (!currentStory || !currentUser) return;
+
+    if (!isOwnStory) {
+      // 1. Record view for someone else's story
+      supabase.from("story_views").insert([{
+        story_id: currentStory.id,
+        viewer_username: currentUser.username,
+        viewer_name: currentUser.full_name,
+        viewer_avatar: currentUser.avatar_url,
+      }]).then(() => {});
+    } else {
+      // 2. Fetch all viewers who saw our story + check if they liked
+      async function fetchViewers() {
+        const { data: views } = await supabase.from("story_views").select("*").eq("story_id", currentStory.id);
+        const { data: likes } = await supabase.from("story_likes").select("username").eq("story_id", currentStory.id);
+
+        const likedUsernames = new Set(likes?.map((l: any) => l.username) || []);
+        const combined = views?.map((v: any) => ({
+          ...v,
+          hasLiked: likedUsernames.has(v.viewer_username),
+        })) || [];
+
+        setStoryViewers(combined);
+      }
+      fetchViewers();
+    }
+  }, [currentStory?.id, isOwnStory, currentUser]);
 
   // Set of usernames who have active 24h stories
   const activeStoryAuthors = new Set(stories.map(s => s.author_username));
@@ -419,26 +512,26 @@ export default function MainFeedPage() {
     }
   };
 
-  // Upload Story (24-Hour Persistence)
+  // 100% Uncropped Full Story Upload (Multiple Stories Supported)
   const handleStoryUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !currentUser) return;
 
     const reader = new FileReader();
     reader.onload = async () => {
-      const base64Media = reader.result as string;
+      const fullUncroppedMedia = reader.result as string;
       const newStoryRecord = {
         author_name: currentUser.full_name,
         author_username: currentUser.username,
         author_avatar: currentUser.avatar_url,
-        media_url: base64Media,
-        caption: "Campus Moment",
+        media_url: fullUncroppedMedia, // ✅ Pure Full Image without any crop
+        caption: "Campus Story",
       };
 
       try {
         const { data, error } = await supabase.from("stories").insert([newStoryRecord]).select().single();
         if (!error && data) {
-          setStories(prev => [data, ...prev]);
+          setStories((prev) => [data, ...prev]);
         }
       } catch (err) {
         console.error("Story upload failed:", err);
@@ -446,6 +539,89 @@ export default function MainFeedPage() {
     };
     reader.readAsDataURL(file);
     e.target.value = "";
+  };
+
+  // Story Like Handler (Saves in Supabase)
+  const handleToggleStoryLike = async () => {
+    if (!currentStory || !currentUser) return;
+    const nextState = !isStoryLiked;
+    setIsStoryLiked(nextState);
+
+    try {
+      if (nextState) {
+        await supabase.from("story_likes").insert([{ story_id: currentStory.id, username: currentUser.username }]);
+        await supabase.from("stories").update({ likes_count: (currentStory.likes_count || 0) + 1 }).eq("id", currentStory.id);
+      }
+    } catch (e) {
+      console.error("Story like error:", e);
+    }
+  };
+
+  // Story Reply / Comment Handler (Saves in Supabase)
+  const handleSendStoryReply = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!storyReplyText.trim() || !currentStory || !currentUser) return;
+
+    const replyPayload = {
+      story_id: currentStory.id,
+      author_name: currentUser.full_name,
+      author_username: currentUser.username,
+      comment_text: storyReplyText.trim(),
+    };
+
+    try {
+      await supabase.from("story_comments").insert([replyPayload]);
+      setStoryReplyText("");
+      alert("Reply sent to @" + currentStory.author_username);
+    } catch (err) {
+      console.error("Reply sending failed:", err);
+    }
+  };
+
+  // Fetch Comments for current story
+  useEffect(() => {
+    if (!currentStory?.id) return;
+    async function loadComments() {
+      const { data } = await supabase.from("story_comments").select("*").eq("story_id", currentStory.id).order("created_at", { ascending: true });
+      if (data) setStoryComments(data);
+    }
+    loadComments();
+  }, [currentStory?.id, isCommentsSheetOpen]);
+
+  const handleShareStory = () => {
+    setIsShareModalOpen(true); // Timer ruk jayega
+    if (navigator.share) {
+      navigator.share({
+        title: "IPECapture Story",
+        text: `Check out @${currentStory?.author_username}'s campus story!`,
+        url: window.location.href,
+      }).finally(() => {
+        setIsShareModalOpen(false); // Band hote hi timer wapas chalega
+      });
+    } else {
+      navigator.clipboard.writeText(window.location.href);
+      alert("Story link copied to clipboard!");
+      setTimeout(() => setIsShareModalOpen(false), 1500);
+    }
+  };
+
+  // Owner comment/reply submission
+  const handleOwnerCommentSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ownerReplyInput.trim() || !currentStory || !currentUser) return;
+
+    const payload = {
+      story_id: currentStory.id,
+      author_name: currentUser.full_name,
+      author_username: currentUser.username,
+      comment_text: ownerReplyInput.trim(),
+    };
+
+    const { data, error } = await supabase.from("story_comments").insert([payload]).select().single();
+    if (!error && data) {
+      setStoryComments((prev) => [...prev, data]);
+      setOwnerReplyInput("");
+    }
   };
 
   // Like Toggle
@@ -539,55 +715,77 @@ export default function MainFeedPage() {
               className="hidden" 
             />
 
-            <div className="flex items-center gap-3.5 overflow-x-auto scrollbar-none py-1">
+            <div className="flex items-center gap-3.5 overflow-x-auto scrollbar-none py-2.5 px-1">
               
-              {/* CURRENT USER STORY / ADD STORY BUBBLE */}
-              <div 
-                onClick={() => userHasActiveStory ? setActiveStory(stories.find(s => s.author_username === currentUser?.username) || null) : storyInputRef.current?.click()}
-                className="flex flex-col items-center gap-1.5 cursor-pointer shrink-0 group"
-              >
+              {/* CURRENT USER STORY (HAMESHA '+' ICON RAHEGA MULTIPLE STORIES KE LIYE) */}
+              <div className="flex flex-col items-center gap-1.5 shrink-0 group">
                 <div className="relative">
-                  {/* Blue Gradient Ring ONLY IF USER HAS ACTIVE STORY */}
-                  <div className={`w-14 h-14 rounded-full flex items-center justify-center transition-transform group-hover:scale-105 duration-200 ${
-                    userHasActiveStory 
-                      ? "p-[2.5px] bg-gradient-to-tr from-[#0F2952] via-[#0284C7] to-[#38BDF8]" 
-                      : "p-[1px] border border-dashed border-zinc-300 dark:border-zinc-700"
-                  }`}>
+                  
+                  {/* Story Watch Circle */}
+                  <div 
+                    onClick={() => {
+                      if (userHasActiveStory) {
+                        setActiveStoryUsername(currentUser?.username);
+                        setCurrentStoryIndex(0);
+                      } else {
+                        storyInputRef.current?.click();
+                      }
+                    }}
+                    className={`w-14 h-14 rounded-full flex items-center justify-center transition-transform group-hover:scale-105 duration-200 cursor-pointer ${
+                      userHasActiveStory 
+                        ? "p-[2.5px] bg-gradient-to-tr from-[#0F2952] via-[#0284C7] to-[#38BDF8]" 
+                        : "p-[1px] border border-dashed border-zinc-300 dark:border-zinc-700"
+                    }`}
+                  >
                     <div className="w-full h-full rounded-full bg-white dark:bg-black p-[2px] overflow-hidden flex items-center justify-center">
                       <UserAvatar avatarUrl={currentUser?.avatar_url} name={currentUser?.full_name} size="md" />
                     </div>
                   </div>
 
-                  {/* Plus Badge if no story */}
-                  {!userHasActiveStory && (
-                    <div className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-[#0284C7] text-white flex items-center justify-center border-2 border-white dark:border-black">
-                      <Plus className="w-3 h-3 stroke-[3]" />
-                    </div>
-                  )}
+                  {/* '+' Button (HAMESHA VISIBLE - Multi-Story Upload) */}
+                  <button
+                    type="button"
+                    title="Add story"
+                    onClick={(e) => {
+                      e.stopPropagation(); // Story open nahi hogi, seedha upload picker khulega
+                      storyInputRef.current?.click();
+                    }}
+                    className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-[#0284C7] hover:bg-[#0ea5e9] text-white flex items-center justify-center border-2 border-white dark:border-black shadow-md cursor-pointer transition hover:scale-110 active:scale-95"
+                  >
+                    <Plus className="w-2.5 h-2.5 stroke-[3]" />
+                  </button>
+
                 </div>
+                
                 <span className="text-[10px] font-mono text-zinc-500 truncate max-w-[62px]">
                   {userHasActiveStory ? "Your Story" : "Add Story"}
                 </span>
               </div>
 
-              {/* OTHER CAMPUS STUDENTS ACTIVE STORIES */}
-              {stories.filter(s => s.author_username !== currentUser?.username).map((story) => (
-                <div 
-                  key={story.id} 
-                  onClick={() => setActiveStory(story)}
-                  className="flex flex-col items-center gap-1.5 cursor-pointer shrink-0 group"
-                >
-                  {/* Blue IPECapture Signature Ring for Active Stories */}
-                  <div className="w-14 h-14 rounded-full p-[2.5px] bg-gradient-to-tr from-[#0F2952] via-[#0284C7] to-[#38BDF8] flex items-center justify-center transition-transform group-hover:scale-105 duration-200">
-                    <div className="w-full h-full rounded-full bg-white dark:bg-black p-[2px] overflow-hidden flex items-center justify-center">
-                      <UserAvatar avatarUrl={story.author_avatar} name={story.author_name} size="md" />
+              {/* Other Campus Students with Active Stories */}
+              {Object.keys(storiesByUser).filter(u => u !== currentUser?.username).map((username) => {
+                const userStories = storiesByUser[username];
+                const firstStory = userStories[0];
+                return (
+                  <div 
+                    key={username} 
+                    onClick={() => {
+                      setActiveStoryUsername(username);
+                      setCurrentStoryIndex(0);
+                    }}
+                    className="flex flex-col items-center gap-1.5 cursor-pointer shrink-0 group"
+                  >
+                    <div className="w-14 h-14 rounded-full p-[2.5px] bg-gradient-to-tr from-[#0F2952] via-[#0284C7] to-[#38BDF8] flex items-center justify-center transition-transform group-hover:scale-105 duration-200">
+                      <div className="w-full h-full rounded-full bg-white dark:bg-black p-[2px] overflow-hidden flex items-center justify-center">
+                        <UserAvatar avatarUrl={firstStory.author_avatar} name={firstStory.author_name} size="md" />
+                      </div>
                     </div>
+                    <span className="text-[10px] font-mono text-zinc-600 dark:text-zinc-400 truncate max-w-[64px]">
+                      {username.split("_")[0]}
+                    </span>
                   </div>
-                  <span className="text-[10px] font-mono text-zinc-600 dark:text-zinc-400 truncate max-w-[64px]">
-                    {story.author_username.split("_")[0]}
-                  </span>
-                </div>
-              ))}
+                );
+              })}
 
             </div>
           </div>
@@ -771,44 +969,365 @@ export default function MainFeedPage() {
       </div>
 
       {/* ========================================================= */}
-      {/* 24-HOUR STORY VIEWER MODAL (INSTAGRAM PARITY)             */}
+      {/* INSTAGRAM / WHATSAPP MULTI-STORY VIEWER WITH REAL ACTIONS  */}
       {/* ========================================================= */}
-      {activeStory && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-sm rounded-3xl overflow-hidden bg-zinc-950 border border-zinc-800 shadow-2xl flex flex-col justify-between h-[520px]">
+      {activeStoryUsername && currentStory && (
+        <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-2 sm:p-4 backdrop-blur-md animate-in fade-in duration-150">
+          <div className="relative w-full max-w-sm rounded-3xl overflow-hidden bg-black border border-zinc-800 shadow-2xl flex flex-col justify-between h-[600px] select-none">
             
-            {/* Top 24-Hour Story Progress Bar */}
-            <div className="p-4 pb-0 space-y-3 z-10 bg-gradient-to-b from-black/80 to-transparent">
-              <div className="w-full h-1 bg-white/20 rounded-full overflow-hidden">
-                <div className="h-full bg-white animate-[progress_5s_linear_forwards] rounded-full"></div>
+            {/* Top Multi-Story Segmented Progress Bars (Instagram Status Line) */}
+            <div className="p-4 pb-2 space-y-2.5 z-20 bg-gradient-to-b from-black/90 to-transparent">
+              <div className="flex gap-1.5 w-full">
+                {currentActiveUserStories.map((_, idx) => (
+                  <div key={idx} className="h-1 flex-1 bg-white/25 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-white transition-all duration-100 ease-linear rounded-full"
+                      style={{
+                        width: idx < currentStoryIndex ? "100%" : idx === currentStoryIndex ? `${storyProgress}%` : "0%",
+                      }}
+                    />
+                  </div>
+                ))}
               </div>
-              <div className="flex items-center justify-between text-white">
+
+              {/* Author Info & Close */}
+              <div className="flex items-center justify-between text-white pt-1">
                 <div className="flex items-center gap-2">
                   <div className="p-[1.5px] rounded-full bg-gradient-to-tr from-[#0F2952] to-[#0284C7]">
-                    <UserAvatar avatarUrl={activeStory.author_avatar} name={activeStory.author_name} size="sm" />
+                    <UserAvatar avatarUrl={currentStory.author_avatar} name={currentStory.author_name} size="sm" />
                   </div>
                   <div>
-                    <p className="text-xs font-bold leading-none">{activeStory.author_name}</p>
-                    <p className="text-[10px] text-zinc-400 font-mono">@{activeStory.author_username}</p>
+                    <p className="text-xs font-bold leading-none">{currentStory.author_name}</p>
+                    <p className="text-[10px] text-zinc-400 font-mono">@{currentStory.author_username}</p>
                   </div>
                 </div>
-                <button type="button" onClick={() => setActiveStory(null)} className="text-white/80 hover:text-white">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveStoryUsername(null);
+                    setCurrentStoryIndex(0);
+                  }}
+                  className="text-white/80 hover:text-white p-1"
+                >
                   <X className="w-5 h-5" />
                 </button>
               </div>
             </div>
 
-            {/* Story Image Content */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <img src={activeStory.media_url} alt="Story" className="w-full h-full object-cover" />
+            {/* Tap Left / Right Navigation Touch Zones (Invisible like Instagram) */}
+            <div
+              onClick={() => currentStoryIndex > 0 && setCurrentStoryIndex((i) => i - 1)}
+              className="absolute left-0 top-16 bottom-20 w-1/3 z-10 cursor-pointer"
+            />
+            <div
+              onClick={() => {
+                if (currentStoryIndex < currentActiveUserStories.length - 1) {
+                  setCurrentStoryIndex((i) => i + 1);
+                } else {
+                  setActiveStoryUsername(null);
+                  setCurrentStoryIndex(0);
+                }
+              }}
+              className="absolute right-0 top-16 bottom-20 w-2/3 z-10 cursor-pointer"
+            />
+
+            {/* Uncropped Full Image Display */}
+            <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
+              <img src={currentStory.media_url} alt="Story" className="w-full h-full object-contain" />
             </div>
 
-            {/* Bottom Caption Overlay */}
-            {activeStory.caption && (
-              <div className="p-4 z-10 bg-gradient-to-t from-black/80 to-transparent text-white text-xs font-medium text-center">
-                {activeStory.caption}
+            {/* ========================================================= */}
+            {/* CONDITIONAL BOTTOM BAR: OWN STORY VS OTHERS' STORY        */}
+            {/* ========================================================= */}
+            <div className="p-3.5 z-20 bg-gradient-to-t from-black/95 via-black/70 to-transparent">
+              
+              {/* CASE A: APNI STORY - Show Seen/Viewers Bar (No Like, No Message) */}
+              {isOwnStory ? (
+                <div
+                  onClick={() => setIsViewersSheetOpen(true)}
+                  className="flex items-center justify-between px-4 py-2.5 rounded-2xl bg-white/10 hover:bg-white/20 transition cursor-pointer backdrop-blur-md border border-white/10 text-white"
+                >
+                  <div className="flex items-center gap-2">
+                    <Eye className="w-4 h-4 text-white" />
+                    <span className="text-xs font-semibold">{storyViewers.length} Views</span>
+                  </div>
+                  <div className="flex items-center gap-1 text-[11px] font-mono text-zinc-300">
+                    <span>Swipe up for activity</span>
+                    <span className="text-xs">↑</span>
+                  </div>
+                </div>
+              ) : (
+                /* CASE B: DOOSRO KI STORY - Show Message Box & Like Heart */
+                <form onSubmit={handleSendStoryReply} className="flex items-center gap-2.5">
+                  <input
+                    type="text"
+                    value={storyReplyText}
+                    onChange={(e) => setStoryReplyText(e.target.value)}
+                    placeholder={`Send message to @${currentStory.author_username}...`}
+                    className="flex-1 bg-black/60 border border-zinc-700 focus:border-white rounded-full px-4 py-2 text-xs text-white placeholder:text-zinc-400 focus:outline-none transition backdrop-blur-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleToggleStoryLike}
+                    className="text-white hover:scale-110 active:scale-95 transition p-1"
+                  >
+                    <Heart className={`w-5 h-5 ${isStoryLiked ? "fill-rose-500 text-rose-500" : "text-white"}`} />
+                  </button>
+                  <button type="submit" className="text-white hover:text-sky-400 transition p-1">
+                    <Send className="w-4 h-4" />
+                  </button>
+                </form>
+              )}
+
+            </div>
+
+            {/* ========================================================= */}
+      {/* STORY VIEWER WITH CHEVRONS, BOTTOM SHEET & EXACT BAR      */}
+      {/* ========================================================= */}
+      {activeStoryUsername && currentStory && (
+        <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-2 sm:p-4 backdrop-blur-md animate-in fade-in duration-150">
+          
+          {/* Navigation Chevron: PREVIOUS (<) */}
+          <button
+            type="button"
+            disabled={currentStoryIndex === 0}
+            onClick={() => {
+              if (currentStoryIndex > 0) {
+                setCurrentStoryIndex((i) => i - 1);
+                setStoryProgress(0);
+              }
+            }}
+            className={`hidden sm:flex items-center justify-center w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white mr-4 transition ${
+              currentStoryIndex === 0 ? "opacity-20 cursor-not-allowed" : "opacity-90 hover:scale-110"
+            }`}
+          >
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+
+          <div className="relative w-full max-w-sm rounded-3xl overflow-hidden bg-black border border-zinc-800 shadow-2xl flex flex-col justify-between h-[600px] select-none">
+            
+            {/* Top Multi-Story Segmented Progress Bars */}
+            <div className="p-4 pb-2 space-y-2.5 z-20 bg-gradient-to-b from-black/90 to-transparent">
+              <div className="flex gap-1.5 w-full">
+                {currentActiveUserStories.map((_, idx) => (
+                  <div key={idx} className="h-1 flex-1 bg-white/25 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-white transition-all duration-100 ease-linear rounded-full"
+                      style={{
+                        width: idx < currentStoryIndex ? "100%" : idx === currentStoryIndex ? `${storyProgress}%` : "0%",
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+
+              {/* Author Header */}
+              <div className="flex items-center justify-between text-white pt-1">
+                <div className="flex items-center gap-2">
+                  <div className="p-[1.5px] rounded-full bg-gradient-to-tr from-[#0F2952] to-[#0284C7]">
+                    <UserAvatar avatarUrl={currentStory.author_avatar} name={currentStory.author_name} size="sm" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold leading-none">{currentStory.author_name}</p>
+                    <p className="text-[10px] text-zinc-400 font-mono">@{currentStory.author_username}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveStoryUsername(null);
+                    setCurrentStoryIndex(0);
+                    setIsViewersSheetOpen(false);
+                    setIsCommentsSheetOpen(false);
+                  }}
+                  className="text-white/80 hover:text-white p-1"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Uncropped Full Image Display */}
+            <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
+              <img src={currentStory.media_url} alt="Story" className="w-full h-full object-contain" />
+            </div>
+
+            {/* ========================================================= */}
+            {/* EXACT BOTTOM BAR AS REQUESTED BY USER                     */}
+            {/* [Eye + count] -------------- [Comment] [Share]            */}
+            {/* ========================================================= */}
+            <div className="p-3.5 z-20 bg-gradient-to-t from-black/95 via-black/70 to-transparent">
+              {isOwnStory ? (
+                <div className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10 text-white">
+                  {/* Left: Eye Icon + View Count */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsViewersSheetOpen(true);
+                      setIsCommentsSheetOpen(false);
+                    }}
+                    className="flex items-center gap-1.5 hover:text-sky-400 transition"
+                  >
+                    <Eye className="w-4 h-4" />
+                    <span className="text-xs font-semibold font-mono">{storyViewers.length}</span>
+                  </button>
+
+                  {/* Right: Comment Icon + Share Icon */}
+                  <div className="flex items-center gap-3.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCommentsSheetOpen(true);
+                        setIsViewersSheetOpen(false);
+                      }}
+                      className="hover:text-sky-400 transition"
+                      title="View & Reply Comments"
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleShareStory}
+                      className="hover:text-sky-400 transition"
+                      title="Share Story"
+                    >
+                      <Share2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                /* Others Story Bottom Bar */
+                <form onSubmit={handleSendStoryReply} className="flex items-center gap-2.5">
+                  <input
+                    type="text"
+                    value={storyReplyText}
+                    onChange={(e) => setStoryReplyText(e.target.value)}
+                    placeholder={`Send message to @${currentStory.author_username}...`}
+                    className="flex-1 bg-black/60 border border-zinc-700 focus:border-white rounded-full px-4 py-2 text-xs text-white placeholder:text-zinc-400 focus:outline-none transition backdrop-blur-sm"
+                  />
+                  <button type="button" onClick={handleToggleStoryLike} className="text-white hover:scale-110 transition p-1">
+                    <Heart className={`w-5 h-5 ${isStoryLiked ? "fill-rose-500 text-rose-500" : "text-white"}`} />
+                  </button>
+                  <button type="submit" className="text-white hover:text-sky-400 transition p-1">
+                    <Send className="w-4 h-4" />
+                  </button>
+                </form>
+              )}
+            </div>
+
+            {/* ========================================================= */}
+            {/* VIEWERS BOTTOM SHEET (48% Height + Internal Scroll)       */}
+            {/* ========================================================= */}
+            {isViewersSheetOpen && (
+              <div className="absolute bottom-0 left-0 right-0 z-30 h-[48%] rounded-t-3xl bg-zinc-950/95 border-t border-zinc-800 backdrop-blur-xl p-3.5 flex flex-col justify-between shadow-2xl animate-in slide-in-from-bottom duration-200">
+                <div className="space-y-2 shrink-0">
+                  <div className="w-8 h-1 bg-zinc-700 rounded-full mx-auto"></div>
+                  <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800 text-white">
+                    <span className="text-xs font-bold font-mono">Seen by {storyViewers.length} students</span>
+                    <button type="button" onClick={() => setIsViewersSheetOpen(false)} className="text-zinc-400 hover:text-white p-0.5">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="space-y-2 overflow-y-auto flex-1 my-2 pr-1.5 scrollbar-thin">
+                  {storyViewers.length === 0 ? (
+                    <p className="text-center text-zinc-500 text-xs py-4 font-mono">No views yet</p>
+                  ) : (
+                    storyViewers.map((viewer) => (
+                      <div key={viewer.viewer_username} className="flex items-center justify-between text-white py-1 hover:bg-white/5 px-2 rounded-xl transition">
+                        <div className="flex items-center gap-2.5">
+                          <div className="relative">
+                            <UserAvatar avatarUrl={viewer.viewer_avatar} name={viewer.viewer_name} size="sm" />
+                            {viewer.hasLiked && (
+                              <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-rose-600 flex items-center justify-center shadow-sm">
+                                <Heart className="w-2 h-2 fill-white text-white" />
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold leading-tight">{viewer.viewer_name}</p>
+                            <p className="text-[10px] text-zinc-400 font-mono">@{viewer.viewer_username}</p>
+                          </div>
+                        </div>
+                        {viewer.hasLiked && <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500 shrink-0" />}
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <button type="button" onClick={() => setIsViewersSheetOpen(false)} className="w-full text-xs font-semibold py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 rounded-xl transition shrink-0">
+                  Close
+                </button>
               </div>
             )}
+
+            {/* ========================================================= */}
+            {/* COMMENTS BOTTOM SHEET (Exact 48% Height + Reply Input)    */}
+            {/* ========================================================= */}
+            {isCommentsSheetOpen && (
+              <div className="absolute bottom-0 left-0 right-0 z-30 h-[48%] rounded-t-3xl bg-zinc-950/95 border-t border-zinc-800 backdrop-blur-xl p-3.5 flex flex-col justify-between shadow-2xl animate-in slide-in-from-bottom duration-200">
+                <div className="space-y-2 shrink-0">
+                  <div className="w-8 h-1 bg-zinc-700 rounded-full mx-auto"></div>
+                  <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800 text-white">
+                    <span className="text-xs font-bold font-mono">Story Comments ({storyComments.length})</span>
+                    <button type="button" onClick={() => setIsCommentsSheetOpen(false)} className="text-zinc-400 hover:text-white p-0.5">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Comments List */}
+                <div className="space-y-2 overflow-y-auto flex-1 my-2 pr-1.5 scrollbar-thin">
+                  {storyComments.length === 0 ? (
+                    <p className="text-center text-zinc-500 text-xs py-4 font-mono">No comments yet. Say something!</p>
+                  ) : (
+                    storyComments.map((c) => (
+                      <div key={c.id} className="text-xs text-white py-1 px-2 rounded-xl bg-white/5 space-y-0.5">
+                        <span className="font-bold text-sky-400">@{c.author_username}: </span>
+                        <span className="text-zinc-200">{c.comment_text}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {/* Reply / Comment Input */}
+                <form onSubmit={handleOwnerCommentSubmit} className="flex items-center gap-2 pt-1 border-t border-zinc-800">
+                  <input
+                    type="text"
+                    value={ownerReplyInput}
+                    onChange={(e) => setOwnerReplyInput(e.target.value)}
+                    placeholder="Write a comment or reply..."
+                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none"
+                  />
+                  <button type="submit" className="text-xs font-semibold px-3 py-1.5 bg-white text-black rounded-xl hover:bg-zinc-200 transition">
+                    Send
+                  </button>
+                </form>
+              </div>
+            )}
+
+          </div>
+
+          {/* Navigation Chevron: NEXT (>) */}
+          <button
+            type="button"
+            disabled={currentStoryIndex >= currentActiveUserStories.length - 1}
+            onClick={() => {
+              if (currentStoryIndex < currentActiveUserStories.length - 1) {
+                setCurrentStoryIndex((i) => i + 1);
+                setStoryProgress(0);
+              }
+            }}
+            className={`hidden sm:flex items-center justify-center w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white ml-4 transition ${
+              currentStoryIndex >= currentActiveUserStories.length - 1 ? "opacity-20 cursor-not-allowed" : "opacity-90 hover:scale-110"
+            }`}
+          >
+            <ChevronRight className="w-6 h-6" />
+          </button>
+
+        </div>
+      )}
 
           </div>
         </div>
