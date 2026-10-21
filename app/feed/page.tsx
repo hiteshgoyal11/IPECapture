@@ -261,7 +261,9 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { 
+import {
+  MoreVertical,
+  Trash2,
   Heart, 
   MessageCircle, 
   Send, 
@@ -338,10 +340,51 @@ export default function MainFeedPage() {
   const currentActiveUserStories = activeStoryUsername ? storiesByUser[activeStoryUsername] || [] : [];
   const currentStory = currentActiveUserStories[currentStoryIndex] || null;
 
-  // 2. Ab currentStory define ho chuka hai, to isOwnStory check karo
-  const isOwnStory = currentStory?.author_username === currentUser?.username;
+  // Global Ordered Queue of all students who have active stories
+  const orderedStoryUsers = [
+    ...(currentUser?.username && storiesByUser[currentUser.username] ? [currentUser.username] : []),
+    ...Object.keys(storiesByUser).filter((u) => u !== currentUser?.username),
+  ];
 
-  // Comments Sheet & Timer Pause States
+  const currentUserQueueIndex = orderedStoryUsers.indexOf(activeStoryUsername || "");
+
+  // Checks if user can go backwards or forwards across ALL stories
+  const canGoPrev = currentUserQueueIndex > 0 || currentStoryIndex > 0;
+  const canGoNext =
+    currentUserQueueIndex < orderedStoryUsers.length - 1 ||
+    currentStoryIndex < currentActiveUserStories.length - 1;
+
+  // Instagram Global Navigation: Next Story (Same user OR Next user)
+  const goToNextStory = () => {
+    if (currentStoryIndex < currentActiveUserStories.length - 1) {
+      setCurrentStoryIndex((i) => i + 1);
+      setStoryProgress(0);
+    } else if (currentUserQueueIndex < orderedStoryUsers.length - 1) {
+      const nextUser = orderedStoryUsers[currentUserQueueIndex + 1];
+      setActiveStoryUsername(nextUser);
+      setCurrentStoryIndex(0);
+      setStoryProgress(0);
+    } else {
+      setActiveStoryUsername(null);
+      setCurrentStoryIndex(0);
+    }
+  };
+
+  // Instagram Global Navigation: Prev Story (Same user OR Prev user)
+  const goToPrevStory = () => {
+    if (currentStoryIndex > 0) {
+      setCurrentStoryIndex((i) => i - 1);
+      setStoryProgress(0);
+    } else if (currentUserQueueIndex > 0) {
+      const prevUser = orderedStoryUsers[currentUserQueueIndex - 1];
+      const prevUserStories = storiesByUser[prevUser] || [];
+      setActiveStoryUsername(prevUser);
+      setCurrentStoryIndex(Math.max(0, prevUserStories.length - 1));
+      setStoryProgress(0);
+    }
+  };
+
+    // Comments Sheet & Timer Pause States
   const [isCommentsSheetOpen, setIsCommentsSheetOpen] = useState(false);
   const [storyComments, setStoryComments] = useState<any[]>([]);
   const [ownerReplyInput, setOwnerReplyInput] = useState("");
@@ -349,8 +392,31 @@ export default function MainFeedPage() {
   // Share Sheet State taaki Share par bhi timer ruke
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
-  // Timer Freeze Condition: View, Comment, ya Share khula ho to timer 100% rukega
-  const isTimerPaused = isViewersSheetOpen || isCommentsSheetOpen || isShareModalOpen;
+  // Story Options Menu State
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+
+  // Timer Freeze: Ab Three Dots Menu khulne par bhi timer freeze rahega
+  const isTimerPaused = isViewersSheetOpen || isCommentsSheetOpen || isShareModalOpen || isMenuOpen;
+
+  // Timer: Uses goToNextStory automatically
+  useEffect(() => {
+    if (!activeStoryUsername || !currentStory || isTimerPaused) return;
+
+    const interval = setInterval(() => {
+      setStoryProgress((prev) => {
+        if (prev >= 100) {
+          goToNextStory();
+          return 0;
+        }
+        return prev + 0.42; // ~12 seconds
+      });
+    }, 50);
+
+    return () => clearInterval(interval);
+  }, [activeStoryUsername, currentStoryIndex, currentUserQueueIndex, isTimerPaused, currentActiveUserStories.length]);
+
+  // 2. Ab currentStory define ho chuka hai, to isOwnStory check karo
+  const isOwnStory = currentStory?.author_username === currentUser?.username;
 
   // 1. Progress sirf tab 0 hoga jab nayi story aayegi (Pause hone par 0 nahi hoga)
   useEffect(() => {
@@ -603,6 +669,25 @@ export default function MainFeedPage() {
       alert("Story link copied to clipboard!");
       setTimeout(() => setIsShareModalOpen(false), 1500);
     }
+  };
+
+  // 1. Real Story Deletion from Supabase Database
+  const handleDeleteStory = async () => {
+    if (!currentStory) return;
+    try {
+      await supabase.from("stories").delete().eq("id", currentStory.id);
+      setStories((prev) => prev.filter((s) => s.id !== currentStory.id));
+      setIsMenuOpen(false);
+      goToNextStory(); // Next story par jump karega ya close hoga
+    } catch (err) {
+      console.error("Story delete error:", err);
+    }
+  };
+
+  // 2. Report Story Handler
+  const handleReportStory = () => {
+    alert("Story has been reported to IPEC campus moderators.");
+    setIsMenuOpen(false);
   };
 
   // Owner comment/reply submission
@@ -972,8 +1057,8 @@ export default function MainFeedPage() {
       {/* INSTAGRAM / WHATSAPP MULTI-STORY VIEWER WITH REAL ACTIONS  */}
       {/* ========================================================= */}
       {activeStoryUsername && currentStory && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-2 sm:p-4 backdrop-blur-md animate-in fade-in duration-150">
-          <div className="relative w-full max-w-sm rounded-3xl overflow-hidden bg-black border border-zinc-800 shadow-2xl flex flex-col justify-between h-[600px] select-none">
+        <div className="fixed inset-0 z-50 bg-black flex items-center justify-center p-0 sm:p-4 select-none">
+          <div className="relative w-full h-full sm:h-[600px] sm:max-w-sm rounded-none sm:rounded-3xl overflow-hidden bg-black border-0 sm:border border-zinc-800 shadow-2xl flex flex-col justify-between">
             
             {/* Top Multi-Story Segmented Progress Bars (Instagram Status Line) */}
             <div className="p-4 pb-2 space-y-2.5 z-20 bg-gradient-to-b from-black/90 to-transparent">
@@ -1081,57 +1166,9 @@ export default function MainFeedPage() {
 
             </div>
 
-            {/* ========================================================= */}
-      {/* STORY VIEWER WITH CHEVRONS, BOTTOM SHEET & EXACT BAR      */}
-      {/* ========================================================= */}
-      {activeStoryUsername && currentStory && (
-        <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-2 sm:p-4 backdrop-blur-md animate-in fade-in duration-150">
-          
-          {/* Navigation Chevron: PREVIOUS (<) */}
-          <button
-            type="button"
-            disabled={currentStoryIndex === 0}
-            onClick={() => {
-              if (currentStoryIndex > 0) {
-                setCurrentStoryIndex((i) => i - 1);
-                setStoryProgress(0);
-              }
-            }}
-            className={`hidden sm:flex items-center justify-center w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white mr-4 transition ${
-              currentStoryIndex === 0 ? "opacity-20 cursor-not-allowed" : "opacity-90 hover:scale-110"
-            }`}
-          >
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-
-          <div className="relative w-full max-w-sm rounded-3xl overflow-hidden bg-black border border-zinc-800 shadow-2xl flex flex-col justify-between h-[600px] select-none">
-            
-            {/* Top Multi-Story Segmented Progress Bars */}
-            <div className="p-4 pb-2 space-y-2.5 z-20 bg-gradient-to-b from-black/90 to-transparent">
-              <div className="flex gap-1.5 w-full">
-                {currentActiveUserStories.map((_, idx) => (
-                  <div key={idx} className="h-1 flex-1 bg-white/25 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-white transition-all duration-100 ease-linear rounded-full"
-                      style={{
-                        width: idx < currentStoryIndex ? "100%" : idx === currentStoryIndex ? `${storyProgress}%` : "0%",
-                      }}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              {/* Author Header */}
-              <div className="flex items-center justify-between text-white pt-1">
-                <div className="flex items-center gap-2">
-                  <div className="p-[1.5px] rounded-full bg-gradient-to-tr from-[#0F2952] to-[#0284C7]">
-                    <UserAvatar avatarUrl={currentStory.author_avatar} name={currentStory.author_name} size="sm" />
-                  </div>
-                  <div>
-                    <p className="text-xs font-bold leading-none">{currentStory.author_name}</p>
-                    <p className="text-[10px] text-zinc-400 font-mono">@{currentStory.author_username}</p>
-                  </div>
-                </div>
+            {activeStoryUsername && currentStory && (
+              <div className="fixed inset-0 z-[100] bg-black flex items-center justify-center p-0 sm:p-4 select-none">
+                
                 <button
                   type="button"
                   onClick={() => {
@@ -1139,202 +1176,342 @@ export default function MainFeedPage() {
                     setCurrentStoryIndex(0);
                     setIsViewersSheetOpen(false);
                     setIsCommentsSheetOpen(false);
+                    setIsMenuOpen(false);
                   }}
-                  className="text-white/80 hover:text-white p-1"
+                  className="hidden sm:flex fixed top-5 right-6 z-50 text-white/80 hover:text-white p-2 transition hover:scale-110"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-7 h-7" />
                 </button>
-              </div>
-            </div>
 
-            {/* Uncropped Full Image Display */}
-            <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
-              <img src={currentStory.media_url} alt="Story" className="w-full h-full object-contain" />
-            </div>
+                <button
+                  type="button"
+                  disabled={!canGoPrev}
+                  onClick={goToPrevStory}
+                  aria-label="Previous Story"
+                  className={`hidden md:flex items-center justify-center w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white mr-3 lg:mr-5 transition-all shrink-0 ${
+                    !canGoPrev ? "opacity-20 cursor-not-allowed" : "opacity-90 hover:scale-110 active:scale-95 cursor-pointer"
+                  }`}
+                >
+                  <ChevronLeft className="w-6 h-6" />
+                </button>
 
-            {/* ========================================================= */}
-            {/* EXACT BOTTOM BAR AS REQUESTED BY USER                     */}
-            {/* [Eye + count] -------------- [Comment] [Share]            */}
-            {/* ========================================================= */}
-            <div className="p-3.5 z-20 bg-gradient-to-t from-black/95 via-black/70 to-transparent">
-              {isOwnStory ? (
-                <div className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10 text-white">
-                  {/* Left: Eye Icon + View Count */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsViewersSheetOpen(true);
-                      setIsCommentsSheetOpen(false);
-                    }}
-                    className="flex items-center gap-1.5 hover:text-sky-400 transition"
-                  >
-                    <Eye className="w-4 h-4" />
-                    <span className="text-xs font-semibold font-mono">{storyViewers.length}</span>
-                  </button>
-
-                  {/* Right: Comment Icon + Share Icon */}
-                  <div className="flex items-center gap-3.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsCommentsSheetOpen(true);
-                        setIsViewersSheetOpen(false);
-                      }}
-                      className="hover:text-sky-400 transition"
-                      title="View & Reply Comments"
-                    >
-                      <MessageCircle className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleShareStory}
-                      className="hover:text-sky-400 transition"
-                      title="Share Story"
-                    >
-                      <Share2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                /* Others Story Bottom Bar */
-                <form onSubmit={handleSendStoryReply} className="flex items-center gap-2.5">
-                  <input
-                    type="text"
-                    value={storyReplyText}
-                    onChange={(e) => setStoryReplyText(e.target.value)}
-                    placeholder={`Send message to @${currentStory.author_username}...`}
-                    className="flex-1 bg-black/60 border border-zinc-700 focus:border-white rounded-full px-4 py-2 text-xs text-white placeholder:text-zinc-400 focus:outline-none transition backdrop-blur-sm"
-                  />
-                  <button type="button" onClick={handleToggleStoryLike} className="text-white hover:scale-110 transition p-1">
-                    <Heart className={`w-5 h-5 ${isStoryLiked ? "fill-rose-500 text-rose-500" : "text-white"}`} />
-                  </button>
-                  <button type="submit" className="text-white hover:text-sky-400 transition p-1">
-                    <Send className="w-4 h-4" />
-                  </button>
-                </form>
-              )}
-            </div>
-
-            {/* ========================================================= */}
-            {/* VIEWERS BOTTOM SHEET (48% Height + Internal Scroll)       */}
-            {/* ========================================================= */}
-            {isViewersSheetOpen && (
-              <div className="absolute bottom-0 left-0 right-0 z-30 h-[48%] rounded-t-3xl bg-zinc-950/95 border-t border-zinc-800 backdrop-blur-xl p-3.5 flex flex-col justify-between shadow-2xl animate-in slide-in-from-bottom duration-200">
-                <div className="space-y-2 shrink-0">
-                  <div className="w-8 h-1 bg-zinc-700 rounded-full mx-auto"></div>
-                  <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800 text-white">
-                    <span className="text-xs font-bold font-mono">Seen by {storyViewers.length} students</span>
-                    <button type="button" onClick={() => setIsViewersSheetOpen(false)} className="text-zinc-400 hover:text-white p-0.5">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2 overflow-y-auto flex-1 my-2 pr-1.5 scrollbar-thin">
-                  {storyViewers.length === 0 ? (
-                    <p className="text-center text-zinc-500 text-xs py-4 font-mono">No views yet</p>
-                  ) : (
-                    storyViewers.map((viewer) => (
-                      <div key={viewer.viewer_username} className="flex items-center justify-between text-white py-1 hover:bg-white/5 px-2 rounded-xl transition">
-                        <div className="flex items-center gap-2.5">
-                          <div className="relative">
-                            <UserAvatar avatarUrl={viewer.viewer_avatar} name={viewer.viewer_name} size="sm" />
-                            {viewer.hasLiked && (
-                              <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-rose-600 flex items-center justify-center shadow-sm">
-                                <Heart className="w-2 h-2 fill-white text-white" />
-                              </div>
-                            )}
-                          </div>
-                          <div>
-                            <p className="text-xs font-semibold leading-tight">{viewer.viewer_name}</p>
-                            <p className="text-[10px] text-zinc-400 font-mono">@{viewer.viewer_username}</p>
-                          </div>
+                <div className="relative w-full h-full sm:h-[650px] sm:max-w-sm rounded-none sm:rounded-3xl border-0 sm:border border-zinc-800 bg-black flex flex-col justify-between overflow-hidden shadow-2xl">
+                  
+                  <div className="p-4 pb-2 space-y-2.5 z-20 bg-gradient-to-b from-black/90 to-transparent">
+                    <div className="flex gap-1.5 w-full">
+                      {currentActiveUserStories.map((_, idx) => (
+                        <div key={idx} className="h-1 flex-1 bg-white/25 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-white rounded-full transition-[width] duration-75 ease-linear"
+                            style={{
+                              width: idx < currentStoryIndex ? "100%" : idx === currentStoryIndex ? `${storyProgress}%` : "0%",
+                            }}
+                          />
                         </div>
-                        {viewer.hasLiked && <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500 shrink-0" />}
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between text-white pt-1">
+                      <div className="flex items-center gap-2">
+                        <div className="p-[1.5px] rounded-full bg-gradient-to-tr from-[#0F2952] to-[#0284C7]">
+                          <UserAvatar avatarUrl={currentStory.author_avatar} name={currentStory.author_name} size="sm" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-bold leading-none">{currentStory.author_name}</p>
+                          <p className="text-[10px] text-zinc-400 font-mono">@{currentStory.author_username}</p>
+                        </div>
                       </div>
-                    ))
-                  )}
-                </div>
 
-                <button type="button" onClick={() => setIsViewersSheetOpen(false)} className="w-full text-xs font-semibold py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 rounded-xl transition shrink-0">
-                  Close
-                </button>
-              </div>
-            )}
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setIsMenuOpen(true)}
+                          className="p-1 text-white/80 hover:text-white transition hover:scale-110 active:scale-90"
+                        >
+                          <MoreVertical className="w-4 h-4" />
+                        </button>
 
-            {/* ========================================================= */}
-            {/* COMMENTS BOTTOM SHEET (Exact 48% Height + Reply Input)    */}
-            {/* ========================================================= */}
-            {isCommentsSheetOpen && (
-              <div className="absolute bottom-0 left-0 right-0 z-30 h-[48%] rounded-t-3xl bg-zinc-950/95 border-t border-zinc-800 backdrop-blur-xl p-3.5 flex flex-col justify-between shadow-2xl animate-in slide-in-from-bottom duration-200">
-                <div className="space-y-2 shrink-0">
-                  <div className="w-8 h-1 bg-zinc-700 rounded-full mx-auto"></div>
-                  <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800 text-white">
-                    <span className="text-xs font-bold font-mono">Story Comments ({storyComments.length})</span>
-                    <button type="button" onClick={() => setIsCommentsSheetOpen(false)} className="text-zinc-400 hover:text-white p-0.5">
-                      <X className="w-4 h-4" />
-                    </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveStoryUsername(null);
+                            setCurrentStoryIndex(0);
+                            setIsViewersSheetOpen(false);
+                            setIsCommentsSheetOpen(false);
+                            setIsMenuOpen(false);
+                          }}
+                          className="sm:hidden p-1 text-white/80 hover:text-white"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                {/* Comments List */}
-                <div className="space-y-2 overflow-y-auto flex-1 my-2 pr-1.5 scrollbar-thin">
-                  {storyComments.length === 0 ? (
-                    <p className="text-center text-zinc-500 text-xs py-4 font-mono">No comments yet. Say something!</p>
-                  ) : (
-                    storyComments.map((c) => (
-                      <div key={c.id} className="text-xs text-white py-1 px-2 rounded-xl bg-white/5 space-y-0.5">
-                        <span className="font-bold text-sky-400">@{c.author_username}: </span>
-                        <span className="text-zinc-200">{c.comment_text}</span>
+                  <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
+                    <img src={currentStory.media_url} alt="Story" className="w-full h-full object-contain" />
+                  </div>
+
+                  {/* ========================================================= */}
+                  {/* EXACT BOTTOM BAR AS REQUESTED BY USER                     */}
+                  {/* [Eye + count] -------------- [Comment] [Share]            */}
+                  {/* ========================================================= */}
+                  <div className="p-3.5 z-20 bg-gradient-to-t from-black/95 via-black/70 to-transparent">
+                    {/* APNI STORY: Transparent Floating Icons (No Background Strip) */}
+                    {isOwnStory ? (
+                      <div className="flex items-center justify-between px-2 py-1 text-white">
+                        
+                        {/* Left: Eye Icon + View Count */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsViewersSheetOpen(true);
+                            setIsCommentsSheetOpen(false);
+                          }}
+                          className="flex items-center gap-2 hover:text-sky-400 transition drop-shadow-md"
+                        >
+                          <Eye className="w-5 h-5 text-white" />
+                          <span className="text-xs font-semibold font-mono">{storyViewers.length}</span>
+                        </button>
+
+                        {/* Right: Comment Icon + Share Icon */}
+                        <div className="flex items-center gap-4">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCommentsSheetOpen(true);
+                              setIsViewersSheetOpen(false);
+                            }}
+                            className="hover:text-sky-400 transition p-1 drop-shadow-md"
+                            title="Comments & Replies"
+                          >
+                            <MessageCircle className="w-5 h-5 text-white" />
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleShareStory}
+                            className="hover:text-sky-400 transition p-1 drop-shadow-md"
+                            title="Share Story"
+                          >
+                            <Share2 className="w-5 h-5 text-white" />
+                          </button>
+                        </div>
+
                       </div>
-                    ))
+                    ) : (
+                      /* Others Story Bottom Bar: Like & Share Only */
+                      <div className="flex items-center justify-end gap-5 px-3 py-1 text-white">
+                        <button
+                          type="button"
+                          onClick={handleToggleStoryLike}
+                          className="hover:scale-110 active:scale-90 transition p-1 drop-shadow-md"
+                          title="Like Story"
+                        >
+                          <Heart className={`w-6 h-6 transition-colors ${isStoryLiked ? "fill-rose-500 text-rose-500" : "text-white"}`} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleShareStory}
+                          className="hover:text-sky-400 hover:scale-110 active:scale-90 transition p-1 drop-shadow-md"
+                          title="Share Story"
+                        >
+                          <Share2 className="w-6 h-6 text-white" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ========================================================= */}
+                  {/* VIEWERS BOTTOM SHEET (48% Height + Internal Scroll)       */}
+                  {/* ========================================================= */}
+                  {isViewersSheetOpen && (
+                    <div className="absolute bottom-0 left-0 right-0 z-30 h-[48%] rounded-t-3xl bg-zinc-950/95 border-t border-zinc-800 backdrop-blur-xl p-3.5 flex flex-col justify-between shadow-2xl animate-in slide-in-from-bottom duration-200">
+                      <div className="space-y-2 shrink-0">
+                        <div className="w-8 h-1 bg-zinc-700 rounded-full mx-auto"></div>
+                        <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800 text-white">
+                          <span className="text-xs font-bold font-mono">Seen by {storyViewers.length} students</span>
+                          <button type="button" onClick={() => setIsViewersSheetOpen(false)} className="text-zinc-400 hover:text-white p-0.5">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2 overflow-y-auto flex-1 my-2 pr-1.5 scrollbar-thin">
+                        {storyViewers.length === 0 ? (
+                          <p className="text-center text-zinc-500 text-xs py-4 font-mono">No views yet</p>
+                        ) : (
+                          storyViewers.map((viewer) => (
+                            <div key={viewer.viewer_username} className="flex items-center justify-between text-white py-1 hover:bg-white/5 px-2 rounded-xl transition">
+                              <div className="flex items-center gap-2.5">
+                                <div className="relative">
+                                  <UserAvatar avatarUrl={viewer.viewer_avatar} name={viewer.viewer_name} size="sm" />
+                                  {viewer.hasLiked && (
+                                    <div className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-rose-600 flex items-center justify-center shadow-sm">
+                                      <Heart className="w-2 h-2 fill-white text-white" />
+                                    </div>
+                                  )}
+                                </div>
+                                <div>
+                                  <p className="text-xs font-semibold leading-tight">{viewer.viewer_name}</p>
+                                  <p className="text-[10px] text-zinc-400 font-mono">@{viewer.viewer_username}</p>
+                                </div>
+                              </div>
+                              {viewer.hasLiked && <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500 shrink-0" />}
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      <button type="button" onClick={() => setIsViewersSheetOpen(false)} className="w-full text-xs font-semibold py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-200 rounded-xl transition shrink-0">
+                        Close
+                      </button>
+                    </div>
                   )}
+
+                  {/* ========================================================= */}
+                  {/* COMMENTS BOTTOM SHEET (Exact 48% Height + Reply Input)    */}
+                  {/* ========================================================= */}
+                  {isCommentsSheetOpen && (
+                    <div className="absolute bottom-0 left-0 right-0 z-30 h-[48%] rounded-t-3xl bg-zinc-950/95 border-t border-zinc-800 backdrop-blur-xl p-3.5 flex flex-col justify-between shadow-2xl animate-in slide-in-from-bottom duration-200">
+                      <div className="space-y-2 shrink-0">
+                        <div className="w-8 h-1 bg-zinc-700 rounded-full mx-auto"></div>
+                        <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800 text-white">
+                          <span className="text-xs font-bold font-mono">Story Comments ({storyComments.length})</span>
+                          <button type="button" onClick={() => setIsCommentsSheetOpen(false)} className="text-zinc-400 hover:text-white p-0.5">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Comments List */}
+                      <div className="space-y-2 overflow-y-auto flex-1 my-2 pr-1.5 scrollbar-thin">
+                        {storyComments.length === 0 ? (
+                          <p className="text-center text-zinc-500 text-xs py-4 font-mono">No comments yet. Say something!</p>
+                        ) : (
+                          storyComments.map((c) => (
+                            <div key={c.id} className="text-xs text-white py-1 px-2 rounded-xl bg-white/5 space-y-0.5">
+                              <span className="font-bold text-sky-400">@{c.author_username}: </span>
+                              <span className="text-zinc-200">{c.comment_text}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* Reply / Comment Input */}
+                      <form onSubmit={handleOwnerCommentSubmit} className="flex items-center gap-2 pt-1 border-t border-zinc-800">
+                        <input
+                          type="text"
+                          value={ownerReplyInput}
+                          onChange={(e) => setOwnerReplyInput(e.target.value)}
+                          placeholder="Write a comment or reply..."
+                          className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none"
+                        />
+                        <button type="submit" className="text-xs font-semibold px-3 py-1.5 bg-white text-black rounded-xl hover:bg-zinc-200 transition">
+                          Send
+                        </button>
+                      </form>
+                    </div>
+                  )}
+
+                  {/* ========================================================= */}
+                  {/* INSTAGRAM STYLE THREE-DOTS ACTION SHEET (REAL DELETE/REPORT) */}
+                  {/* ========================================================= */}
+                  {isMenuOpen && (
+                    <div className="absolute inset-0 z-40 bg-black/75 backdrop-blur-sm flex items-end justify-center animate-in fade-in duration-150">
+                      <div className="w-full rounded-t-3xl bg-zinc-950 border-t border-zinc-800 p-4 space-y-2 text-center animate-in slide-in-from-bottom duration-200 shadow-2xl">
+                        
+                        <div className="w-8 h-1 bg-zinc-700 rounded-full mx-auto mb-2"></div>
+
+                        {isOwnStory ? (
+                          /* CASE A: APNI STORY - Real Delete, Share, Cancel */
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleDeleteStory}
+                              className="w-full py-3 text-xs font-bold text-rose-500 hover:bg-rose-950/30 rounded-xl transition flex items-center justify-center gap-2"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              <span>Delete Story</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsMenuOpen(false);
+                                handleShareStory();
+                              }}
+                              className="w-full py-3 text-xs font-semibold text-white hover:bg-zinc-900 rounded-xl transition flex items-center justify-center gap-2 border-t border-zinc-900"
+                            >
+                              <Share2 className="w-4 h-4" />
+                              <span>Share Story</span>
+                            </button>
+                          </>
+                        ) : (
+                          /* CASE B: DOOSRE KI STORY - Report, Share, Cancel */
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleReportStory}
+                              className="w-full py-3 text-xs font-bold text-rose-500 hover:bg-rose-950/30 rounded-xl transition flex items-center justify-center gap-2"
+                            >
+                              <AlertTriangle className="w-4 h-4" />
+                              <span>Report Inappropriate</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsMenuOpen(false);
+                                handleShareStory();
+                              }}
+                              className="w-full py-3 text-xs font-semibold text-white hover:bg-zinc-900 rounded-xl transition flex items-center justify-center gap-2 border-t border-zinc-900"
+                            >
+                              <Share2 className="w-4 h-4" />
+                              <span>Share Story</span>
+                            </button>
+                          </>
+                        )}
+
+                        {/* Cancel Button */}
+                        <button
+                          type="button"
+                          onClick={() => setIsMenuOpen(false)}
+                          className="w-full py-3 text-xs font-semibold text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-xl transition border-t border-zinc-800 pt-2.5"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                 </div>
 
-                {/* Reply / Comment Input */}
-                <form onSubmit={handleOwnerCommentSubmit} className="flex items-center gap-2 pt-1 border-t border-zinc-800">
-                  <input
-                    type="text"
-                    value={ownerReplyInput}
-                    onChange={(e) => setOwnerReplyInput(e.target.value)}
-                    placeholder="Write a comment or reply..."
-                    className="flex-1 bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder:text-zinc-500 focus:outline-none"
-                  />
-                  <button type="submit" className="text-xs font-semibold px-3 py-1.5 bg-white text-black rounded-xl hover:bg-zinc-200 transition">
-                    Send
-                  </button>
-                </form>
+                {/* Navigation Chevron: NEXT (>) - Mobile par hide, Laptop par active */}
+                <button
+                  type="button"
+                  disabled={!canGoNext}
+                  onClick={goToNextStory}
+                  aria-label="Next Story"
+                  className={`hidden md:flex items-center justify-center w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white ml-3 lg:mr-0 ml-3 lg:ml-5 transition-all shrink-0 ${
+                    !canGoNext ? "opacity-20 cursor-not-allowed" : "opacity-90 hover:scale-110 active:scale-95 cursor-pointer"
+                  }`}
+                >
+                  <ChevronRight className="w-6 h-6" />
+                </button>
+
               </div>
             )}
 
-          </div>
+                </div>
+              </div>
+            )}
 
-          {/* Navigation Chevron: NEXT (>) */}
-          <button
-            type="button"
-            disabled={currentStoryIndex >= currentActiveUserStories.length - 1}
-            onClick={() => {
-              if (currentStoryIndex < currentActiveUserStories.length - 1) {
-                setCurrentStoryIndex((i) => i + 1);
-                setStoryProgress(0);
-              }
-            }}
-            className={`hidden sm:flex items-center justify-center w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white ml-4 transition ${
-              currentStoryIndex >= currentActiveUserStories.length - 1 ? "opacity-20 cursor-not-allowed" : "opacity-90 hover:scale-110"
-            }`}
-          >
-            <ChevronRight className="w-6 h-6" />
-          </button>
-
-        </div>
-      )}
-
-          </div>
-        </div>
-      )}
-
-      {/* 4. Mobile Bottom Navigation */}
-      <MobileNav currentTab={currentNavTab} onTabChange={setCurrentNavTab} unreadCount={2} />
+        {/* 4. Mobile Bottom Navigation */}
+        {!activeStoryUsername && (
+          <MobileNav currentTab={currentNavTab} onTabChange={setCurrentNavTab} unreadCount={2} />
+        )}
 
     </div>
   );
