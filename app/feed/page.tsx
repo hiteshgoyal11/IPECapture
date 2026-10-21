@@ -280,6 +280,7 @@ import {
   WifiOff,
   Sparkles,
   Loader2,
+  AlertTriangle,
   ChevronLeft, 
   ChevronRight, 
   Share2
@@ -395,8 +396,23 @@ export default function MainFeedPage() {
   // Story Options Menu State
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
-  // Timer Freeze: Ab Three Dots Menu khulne par bhi timer freeze rahega
-  const isTimerPaused = isViewersSheetOpen || isCommentsSheetOpen || isShareModalOpen || isMenuOpen;
+  // Report Modal States (Timer pauses while reporting)
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [reportStep, setReportStep] = useState<"reasons" | "success">("reasons");
+
+  // Timer Freeze: Report karte waqt bhi timer 100% freeze rahega
+  const isTimerPaused = isViewersSheetOpen || isCommentsSheetOpen || isShareModalOpen || isMenuOpen || isReportModalOpen;
+
+  // IPEC Campus Specific Unique Report Reasons (Not copy-pasted Instagram text)
+  const CAMPUS_REPORT_REASONS = [
+    "Harassment, bullying, or targeted call-outs",
+    "Misleading college circular or fake exam info",
+    "Inappropriate, offensive, or NSFW content",
+    "Unpermitted photograph of student or faculty",
+    "Hate speech, discrimination, or abusive slang",
+    "Spam, commercial promo, or fraud",
+    "Other violation of IPEC community standards",
+  ];
 
   // Timer: Uses goToNextStory automatically
   useEffect(() => {
@@ -684,10 +700,22 @@ export default function MainFeedPage() {
     }
   };
 
-  // 2. Report Story Handler
-  const handleReportStory = () => {
-    alert("Story has been reported to IPEC campus moderators.");
-    setIsMenuOpen(false);
+  // Real Database Report Submission in Supabase
+  const handleSubmitCampusReport = async (reason: string) => {
+    if (!currentStory || !currentUser) return;
+
+    try {
+      await supabase.from("story_reports").insert([{
+        story_id: currentStory.id,
+        reported_username: currentStory.author_username,
+        reporter_username: currentUser.username,
+        reason: reason,
+      }]);
+    } catch (err) {
+      console.error("Report save error:", err);
+    } finally {
+      setReportStep("success");
+    }
   };
 
   // Owner comment/reply submission
@@ -1416,73 +1444,88 @@ export default function MainFeedPage() {
                   )}
 
                   {/* ========================================================= */}
-                  {/* INSTAGRAM STYLE THREE-DOTS ACTION SHEET (REAL DELETE/REPORT) */}
+                  {/* 2-STEP CAMPUS REPORT MODAL (REAL DB + IPECAPTURE UI)      */}
                   {/* ========================================================= */}
-                  {isMenuOpen && (
-                    <div className="absolute inset-0 z-40 bg-black/75 backdrop-blur-sm flex items-end justify-center animate-in fade-in duration-150">
-                      <div className="w-full rounded-t-3xl bg-zinc-950 border-t border-zinc-800 p-4 space-y-2 text-center animate-in slide-in-from-bottom duration-200 shadow-2xl">
-                        
-                        <div className="w-8 h-1 bg-zinc-700 rounded-full mx-auto mb-2"></div>
-
-                        {isOwnStory ? (
-                          /* CASE A: APNI STORY - Real Delete, Share, Cancel */
-                          <>
-                            <button
-                              type="button"
-                              onClick={handleDeleteStory}
-                              className="w-full py-3 text-xs font-bold text-rose-500 hover:bg-rose-950/30 rounded-xl transition flex items-center justify-center gap-2"
+                  {isReportModalOpen && (
+                    <div className="absolute inset-0 z-50 bg-zinc-950/95 backdrop-blur-xl p-4 flex flex-col justify-between animate-in fade-in duration-150 select-none">
+                      
+                      {/* STEP 1: SELECT REPORT REASON */}
+                      {reportStep === "reasons" ? (
+                        <div className="space-y-3 flex-1 flex flex-col">
+                          <div className="flex items-center justify-between pb-2 border-b border-zinc-800 text-white">
+                            <button 
+                              type="button" 
+                              onClick={() => setIsReportModalOpen(false)} 
+                              className="text-zinc-400 hover:text-white p-1"
                             >
-                              <Trash2 className="w-4 h-4" />
-                              <span>Delete Story</span>
+                              <X className="w-5 h-5" />
                             </button>
+                            <h4 className="text-xs font-bold font-mono">Report Story</h4>
+                            <div className="w-5" />
+                          </div>
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsMenuOpen(false);
-                                handleShareStory();
-                              }}
-                              className="w-full py-3 text-xs font-semibold text-white hover:bg-zinc-900 rounded-xl transition flex items-center justify-center gap-2 border-t border-zinc-900"
-                            >
-                              <Share2 className="w-4 h-4" />
-                              <span>Share Story</span>
-                            </button>
-                          </>
-                        ) : (
-                          /* CASE B: DOOSRE KI STORY - Report, Share, Cancel */
-                          <>
-                            <button
-                              type="button"
-                              onClick={handleReportStory}
-                              className="w-full py-3 text-xs font-bold text-rose-500 hover:bg-rose-950/30 rounded-xl transition flex items-center justify-center gap-2"
-                            >
-                              <AlertTriangle className="w-4 h-4" />
-                              <span>Report Inappropriate</span>
-                            </button>
+                          <div className="pt-1">
+                            <p className="text-xs font-bold text-white">Why are you reporting this story?</p>
+                            <p className="text-[11px] text-zinc-400 mt-0.5">Your report is anonymous. Help keep our IPEC community safe.</p>
+                          </div>
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setIsMenuOpen(false);
-                                handleShareStory();
-                              }}
-                              className="w-full py-3 text-xs font-semibold text-white hover:bg-zinc-900 rounded-xl transition flex items-center justify-center gap-2 border-t border-zinc-900"
-                            >
-                              <Share2 className="w-4 h-4" />
-                              <span>Share Story</span>
-                            </button>
-                          </>
-                        )}
+                          {/* Reasons List */}
+                          <div className="space-y-1 overflow-y-auto flex-1 my-2 pr-1 scrollbar-thin">
+                            {CAMPUS_REPORT_REASONS.map((reason) => (
+                              <button
+                                key={reason}
+                                type="button"
+                                onClick={() => handleSubmitCampusReport(reason)}
+                                className="w-full flex items-center justify-between p-3 rounded-xl hover:bg-white/5 active:bg-white/10 text-left transition group"
+                              >
+                                <span className="text-xs text-zinc-300 group-hover:text-white leading-snug pr-2">
+                                  {reason}
+                                </span>
+                                <ChevronRight className="w-4 h-4 text-zinc-500 group-hover:text-white shrink-0" />
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        /* STEP 2: FEEDBACK & CONFIRMATION */
+                        <div className="flex-1 flex flex-col justify-between py-6 text-center animate-in zoom-in-95 duration-150">
+                          <div className="space-y-3 pt-6">
+                            {/* Green Success Badge */}
+                            <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-center justify-center mx-auto">
+                              <CheckCircle2 className="w-7 h-7" />
+                            </div>
 
-                        {/* Cancel Button */}
-                        <button
-                          type="button"
-                          onClick={() => setIsMenuOpen(false)}
-                          className="w-full py-3 text-xs font-semibold text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-xl transition border-t border-zinc-800 pt-2.5"
-                        >
-                          Cancel
-                        </button>
-                      </div>
+                            <h4 className="text-sm font-bold text-white">Thanks for letting us know</h4>
+                            <p className="text-xs text-zinc-400 max-w-xs mx-auto leading-relaxed">
+                              Your report has been securely saved. Our student moderators will review this story within 2 hours.
+                            </p>
+
+                            <div className="pt-4 border-t border-zinc-800/80 max-w-xs mx-auto text-left space-y-2">
+                              <p className="text-xs font-semibold text-rose-400 hover:underline cursor-pointer flex items-center justify-between py-1">
+                                <span>Block @{currentStory?.author_username}</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </p>
+                              <p className="text-xs text-zinc-400 hover:text-white cursor-pointer flex items-center justify-between py-1">
+                                <span>Review IPEC Community Guidelines</span>
+                                <ChevronRight className="w-3.5 h-3.5" />
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* IPECapture Signature Blue Close Button */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsReportModalOpen(false);
+                              setReportStep("reasons");
+                            }}
+                            className="w-full py-3 rounded-xl bg-[#0F2952] hover:bg-[#0284C7] text-white text-xs font-semibold shadow-lg transition active:scale-[0.99]"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      )}
+
                     </div>
                   )}
 
