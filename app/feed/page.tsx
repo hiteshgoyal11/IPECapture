@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import {
   Type,
   SlidersHorizontal,
+  Pipette,
   MoreVertical,
   Trash2,
   Heart, 
@@ -43,7 +44,10 @@ export interface StoryTextItem {
   text: string;
   x: number;
   y: number;
-  style: any; // 👈 "boxed" | "neon" | "plain" ko hata kar sirf `any` likh dein!
+  scale?: number;
+  hasBox?: boolean; // 👈 User decides box ON/OFF
+  color?: string;
+  style: any;
 }
 
 interface Story {
@@ -55,6 +59,8 @@ interface Story {
   caption?: string;
   created_at: string;
   likes_count?: number;
+  hasBox?: boolean;
+  color?: string;
   story_texts?: any[]; // <-- Add this
   filter?: string;               // <-- Add this
   badge?: string | null;         // <-- Add this
@@ -63,6 +69,9 @@ interface Story {
 export default function MainFeedPage() {
   // Open editor for a brand new text
   const handleAddNewText = () => {
+    // handleAddNewText me:
+    setSelectedTextColor("#09090b");
+    setIsColorPickerOpen(false);
     setEditingTextId(null);
     setActiveInputText("");
     setTextStyleMode("boxed");
@@ -71,11 +80,17 @@ export default function MainFeedPage() {
 
   // Open editor for an existing text
   const handleEditText = (item: StoryTextItem) => {
+    setSelectedTextColor(item.color || "#09090b");
+    setIsColorPickerOpen(false);
     setEditingTextId(item.id);
     setActiveInputText(item.text);
     setTextStyleMode(item.style);
+    setTextHasBox(!!item.hasBox);
     setIsTextEditing(true);
   };
+
+  const [textHasBox, setTextHasBox] = useState<boolean>(false);
+  const [activeToolTab, setActiveToolTab] = useState<"style" | "box">("style");
 
   // Save current text (New or Edited)
   const handleFinishText = () => {
@@ -104,17 +119,20 @@ export default function MainFeedPage() {
       setStoryTexts((prev) =>
         prev.map((t) =>
           t.id === editingTextId
-            ? { ...t, text: trimmed, style: textStyleMode }
+            ? { ...t, text: trimmed, style: textStyleMode, hasBox: textHasBox, color: selectedTextColor }
             : t
         )
       );
     } else {
-      const newItem: StoryTextItem = {
+      const newItem: any = {
         id: "txt_" + Date.now().toString(),
         text: trimmed,
         x: 50,
         y: Math.min(70, 42 + storyTexts.length * 8),
+        scale: 1,
+        hasBox: textHasBox,
         style: textStyleMode,
+        color: selectedTextColor
       };
       console.log("➕ [handleFinishText]: Naya text item add ho raha hai:", newItem);
       setStoryTexts((prev) => {
@@ -166,7 +184,10 @@ export default function MainFeedPage() {
     text: string;
     x: number; // percentage (0 to 100)
     y: number; // percentage (0 to 100)
+    scale?: number;
+    hasBox?: boolean;
     style: any; // 👈 "boxed" | "neon" | "plain" ko hata kar sirf `any` likh dein!
+    color?: string;
   }
 
   const [storyTexts, setStoryTexts] = useState<StoryTextItem[]>([]);
@@ -174,6 +195,21 @@ export default function MainFeedPage() {
   const [activeInputText, setActiveInputText] = useState("");
   const [textStyleMode, setTextStyleMode] = useState<any>("boxed"); // 👈 Yahan <any> likh dein
   const [isTextEditing, setIsTextEditing] = useState(false);
+  const [selectedTextColor, setSelectedTextColor] = useState<string>("#09090b");
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState<boolean>(false);
+  useEffect(() => {
+    if (isTextEditing) {
+      const el = document.querySelector("[contenteditable]");
+      if (el) {
+        console.log("🔍 [Editing CSS Check]:", {
+          display: getComputedStyle(el).display,
+          webkitBoxDecorationBreak: (getComputedStyle(el) as any).webkitBoxDecorationBreak,
+          textHasBox: textHasBox,
+          innerHTML: el.innerHTML,
+        });
+      }
+    }
+  }, [isTextEditing, activeInputText, textHasBox]);
   const [isDraggingText, setIsDraggingText] = useState(false);
   const [isOverTrash, setIsOverTrash] = useState(false);
   const [filterToast, setFilterToast] = useState<string | null>(null);
@@ -228,70 +264,133 @@ export default function MainFeedPage() {
     const parent = target.parentElement;
     if (!parent) return;
 
-    let moved = false;
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const rect = parent.getBoundingClientRect();
+    let hasUserMoved = false;
+    let isPinchingActive = false;
+    const initialPointerX = e.clientX;
+    const initialPointerY = e.clientY;
+    const viewportBoundingRect = parent.getBoundingClientRect();
 
-    // Find current item positions
-    const item = storyTexts.find((t) => t.id === id);
-    if (!item) return;
+    const currentItem = storyTexts.find((textNode) => textNode.id === id);
+    if (!currentItem) return;
 
-    let currentXPercent = item.x;
-    let currentYPercent = item.y;
+    let computedXPercent = currentItem.x;
+    let computedYPercent = currentItem.y;
+    let activeScaleMultiplier = currentItem.scale || 1.0;
+    let anchorScaleSnapshot = activeScaleMultiplier;
+
+    const pointerRoster = new Map<number, { clientX: number; clientY: number }>();
+    pointerRoster.set(e.pointerId, { clientX: e.clientX, clientY: e.clientY });
+
+    let initialTouchSpanDistance = 0;
 
     setIsDraggingText(true);
 
     const onPointerMove = (moveEvent: PointerEvent) => {
-      const deltaX = moveEvent.clientX - startX;
-      const deltaY = moveEvent.clientY - startY;
+      pointerRoster.set(moveEvent.pointerId, {
+        clientX: moveEvent.clientX,
+        clientY: moveEvent.clientY,
+      });
 
-      if (Math.hypot(deltaX, deltaY) > 6) {
-        moved = true;
+      // =========================================================================
+      // MODE 1: MOBILE & TABLET DUAL-TOUCH PINCH TO ZOOM / RESIZE
+      // =========================================================================
+      if (pointerRoster.size >= 2) {
+        isPinchingActive = true;
+        const activeFingerPoints = Array.from(pointerRoster.values());
+        const currentInterDistance = Math.hypot(
+          activeFingerPoints[0].clientX - activeFingerPoints[1].clientX,
+          activeFingerPoints[0].clientY - activeFingerPoints[1].clientY
+        );
+
+        if (!initialTouchSpanDistance) {
+          initialTouchSpanDistance = currentInterDistance;
+          anchorScaleSnapshot = activeScaleMultiplier;
+        } else {
+          const expansionRatio = currentInterDistance / initialTouchSpanDistance;
+          activeScaleMultiplier = Math.min(3.8, Math.max(0.45, anchorScaleSnapshot * expansionRatio));
+
+          target.style.transform = `translate(-50%, -50%) scale(${activeScaleMultiplier}) translateZ(0)`;
+        }
+        return;
       }
 
-      // Calculate percentage without triggering React re-renders
-      currentXPercent = Math.min(88, Math.max(12, item.x + (deltaX / rect.width) * 100));
-      currentYPercent = Math.min(88, Math.max(12, item.y + (deltaY / rect.height) * 100));
+      // =========================================================================
+      // MODE 2: SINGLE-POINTER TRANSLATION & PANNING (DESKTOP, MOUSE & MOBILE DRAG)
+      // =========================================================================
+      if (!isPinchingActive) {
+        const displacementDeltaX = moveEvent.clientX - initialPointerX;
+        const displacementDeltaY = moveEvent.clientY - initialPointerY;
 
-      // 🚀 Direct GPU hardware transform (No Hang, Smooth as butter)
-      target.style.left = `${currentXPercent}%`;
-      target.style.top = `${currentYPercent}%`;
+        if (Math.hypot(displacementDeltaX, displacementDeltaY) > 5) {
+          hasUserMoved = true;
+        }
 
-      // Check trash drop zone
-      if (currentYPercent > 78 && Math.abs(currentXPercent - 50) < 22) {
-        setIsOverTrash(true);
-      } else {
-        setIsOverTrash(false);
+        computedXPercent = Math.min(88, Math.max(12, currentItem.x + (displacementDeltaX / viewportBoundingRect.width) * 100));
+        computedYPercent = Math.min(90, Math.max(10, currentItem.y + (displacementDeltaY / viewportBoundingRect.height) * 100));
+
+        // Direct hardware layer mutation bypassing React reconciliation cycles
+        target.style.left = `${computedXPercent}%`;
+        target.style.top = `${computedYPercent}%`;
+
+        // Trash Removal Zone Calculation (Bottom 22% Screen Center)
+        const isHoveringTrashTarget = computedYPercent > 78 && Math.abs(computedXPercent - 50) < 22;
+        if (isHoveringTrashTarget) {
+          setIsOverTrash(true);
+          target.style.transform = `translate(-50%, -50%) scale(${activeScaleMultiplier * 0.72}) rotate(-6deg) translateZ(0)`;
+        } else {
+          setIsOverTrash(false);
+          target.style.transform = `translate(-50%, -50%) scale(${activeScaleMultiplier}) translateZ(0)`;
+        }
       }
     };
 
-    const onPointerUp = () => {
+    const onPointerUp = (upEvent: PointerEvent) => {
+      pointerRoster.delete(upEvent.pointerId);
+
+      // Multi-touch fallback: Wait till all fingers release before finalizing state
+      if (pointerRoster.size > 0) {
+        initialTouchSpanDistance = 0;
+        return;
+      }
+
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
 
       setIsDraggingText(false);
       setIsOverTrash(false);
 
-      // Check if dropped into trash
-      if (currentYPercent > 78 && Math.abs(currentXPercent - 50) < 22) {
-        setStoryTexts((prev) => prev.filter((t) => t.id !== id));
+      // 1. Trashed Drop Verification
+      const isTargetDroppedInTrash = computedYPercent > 78 && Math.abs(computedXPercent - 50) < 22;
+      if (isTargetDroppedInTrash) {
+        setStoryTexts((previousNodes) => previousNodes.filter((textNode) => textNode.id !== id));
         return;
       }
 
-      // Drag khatam hone par final coordinates SIRF EK BAAR state me save honge
-      if (moved) {
-        setStoryTexts((prev) =>
-          prev.map((t) => (t.id === id ? { ...t, x: currentXPercent, y: currentYPercent } : t))
+      // 2. Commit Position and Scale Mutations to Global State
+      const hasPhysicalMutationOccurred = hasUserMoved || isPinchingActive || activeScaleMultiplier !== (currentItem.scale || 1.0);
+      if (hasPhysicalMutationOccurred) {
+        setStoryTexts((previousNodes) =>
+          previousNodes.map((textNode) =>
+            textNode.id === id
+              ? {
+                  ...textNode,
+                  x: computedXPercent,
+                  y: computedYPercent,
+                  scale: Number(activeScaleMultiplier.toFixed(3)),
+                }
+              : textNode
+          )
         );
       } else {
-        // Agar sirf click/tap tha bina move kiye -> toh edit mode open hoga
-        handleEditText(item);
+        // 3. Simple Click/Tap Interaction -> Trigger In-place Text Editing Studio
+        handleEditText(currentItem);
       }
     };
 
     window.addEventListener("pointermove", onPointerMove, { passive: true });
     window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
   };
   const [storyBadge, setStoryBadge] = useState<string | null>(null);
   const [storyFilter, setStoryFilter] = useState<"Original" | "grayscale" | "warm">("Original");
@@ -1313,6 +1412,9 @@ export default function MainFeedPage() {
       {/* ========================================================= */}
       {isEditorOpen && editorRawImage && (
         <div className="fixed inset-0 z-[110] bg-black flex items-center justify-center p-0 sm:p-4 select-none animate-in fade-in duration-150">
+          <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=Caveat:wght@600&family=Courier+Prime:ital,wght@0,700;1,750&family=Playfair+Display:ital,wght@1,600&family=Bebas+Neue&family=Comfortaa:wght@700&family=Cinzel:wght@600&display=swap');
+          `}</style>
           <div className="relative w-full h-full sm:h-[650px] sm:max-w-sm rounded-none sm:rounded-3xl border-0 sm:border border-zinc-800 bg-black flex flex-col justify-between overflow-hidden shadow-2xl">
             
             {/* Top Toolbar: [✕ Cancel] -------------------- [Aa New Text] [✨ Tone Filter] */}
@@ -1344,13 +1446,6 @@ export default function MainFeedPage() {
                   className="relative group flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-black/40 hover:bg-black/70 active:bg-black/90 text-white backdrop-blur-md border border-white/10 transition-all duration-200 hover:scale-105 active:scale-95 shadow-lg cursor-pointer"
                 >
                   <Type className="w-4 h-4 sm:w-4.5 sm:h-4.5 transition-transform duration-200 group-hover:scale-110" />
-                  
-                  {/* Subtle Badge indicator showing current text count */}
-                  {storyTexts.length > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#0284C7] text-white text-[9px] font-mono font-bold flex items-center justify-center shadow-md border border-black">
-                      {storyTexts.length}
-                    </span>
-                  )}
                 </button>
 
                 {/* 2. Color Tone Filter Switcher with Middle Toast */}
@@ -1408,24 +1503,92 @@ export default function MainFeedPage() {
               })()}
 
               {/* 3. Multi-Texts (Free-drag anywhere + Mobile 1-Tap / Desktop Double-Click to Edit) */}
-              {/* 3. Multi-Texts (Free-drag anywhere + Mobile 1-Tap / Desktop Double-Click to Edit) */}
-              {/* Authentic Instagram Typography Engine */}
               {storyTexts.map((item, index) => {
                 const isOverTrashZone = isDraggingText && item.y > 78 && Math.abs(item.x - 50) < 22;
+                const currentScale = item.scale || 1;
 
                 return (
                   <div
                     key={item.id || `story-text-layer-${index}`}
                     onPointerDown={(e) => handleDragText(item.id, e)}
+                    ref={(el) => {
+                      if (!el) return;
+                      el.onwheel = (e: WheelEvent) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const zoomFactor = e.deltaY < 0 ? 1.05 : 0.95;
+                        setStoryTexts((prev) =>
+                          prev.map((t) =>
+                            t.id === item.id
+                              ? { ...t, scale: Math.min(4.5, Math.max(0.4, (t.scale || 1) * zoomFactor)) }
+                              : t
+                          )
+                        );
+                      };
+                    }}
                     style={{
                       left: `${item.x}%`,
                       top: `${item.y}%`,
-                      transform: `translate(-50%, -50%) scale(${isOverTrashZone ? 0.72 : 1}) rotate(${isOverTrashZone ? -6 : 0}deg)`,
+                      transform: `translate(-50%, -50%) scale(${currentScale * (isOverTrashZone ? 0.72 : 1)}) rotate(${isOverTrashZone ? -6 : 0}deg)`,
                       touchAction: "none",
                     }}
-                    className={`absolute z-20 cursor-grab active:cursor-grabbing select-none text-center max-w-[88%] will-change-transform ${getTextStyleClass(item.style)}`}
+                    className="absolute z-20 cursor-grab active:cursor-grabbing select-none text-center w-full max-w-[86%] sm:max-w-[80%] md:max-w-[75%] pointer-events-auto will-change-transform transition-transform duration-75"
                   >
-                    <span className="block leading-tight break-words pointer-events-none select-none">
+                    {/* 
+                      🔥 INSTAGRAM STEPPED CONNECTED PILLS:
+                      `inline` + `box-decoration-break: clone` se har line ka box alag size ka banta hai
+                      aur aapas mein jud kar organic cloud/bubble shape banata hai.
+                    */}
+                    <span
+                      style={{ 
+                        lineHeight: 1.35, 
+                        padding: "6px 14px", 
+                        borderRadius: "14px",
+                        WebkitBoxDecorationBreak: "clone",
+                        boxDecorationBreak: "clone" as any,
+                        backgroundColor: (item?.hasBox ?? textHasBox) 
+                          ? (item?.color || selectedTextColor || "#09090b") 
+                          : "transparent",
+                        color: (item?.hasBox ?? textHasBox)
+                          ? (["#ffffff", "#eab308", "#fde047"].includes((item?.color || selectedTextColor || "").toLowerCase()) ? "#09090b" : "#ffffff")
+                          : (item?.color || selectedTextColor || "#ffffff"),
+                      }}
+                      className={`inline text-center text-xl sm:text-2xl outline-none border-none ring-0 max-w-[85%] break-words whitespace-pre-wrap box-decoration-clone ${
+                        !(item?.hasBox ?? textHasBox) 
+                          ? "drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)]" 
+                          : "shadow-none"
+                      } ${
+                        item.style === "modern"
+                          ? "[font-family:'Oswald',sans-serif] font-medium tracking-normal uppercase"
+                          : item.style === "signature"
+                          ? "[font-family:'Caveat',cursive] font-semibold tracking-normal"
+                          : item.style === "editor"
+                          ? "[font-family:'Courier_Prime',monospace] font-bold tracking-tight"
+                          : item.style === "poster"
+                          ? "[font-family:Georgia,serif] font-black tracking-tighter uppercase italic"
+                          : item.style === "bubble"
+                          ? "[font-family:'Comfortaa',cursive,sans-serif] font-bold tracking-tight lowercase first-letter:uppercase"
+                          : item.style === "deco"
+                          ? "[font-family:'Montserrat',sans-serif] font-extralight tracking-[0.25em] uppercase"
+                          : item.style === "squeeze"
+                          ? "[font-family:'Bebas_Neue',sans-serif] tracking-wider uppercase inline-block scale-y-125"
+                          : item.style === "strong"
+                          ? "font-sans [font-family:Impact,sans-serif] italic uppercase tracking-tight"
+                          : item.style === "typewriter"
+                          ? "[font-family:'Courier_Prime',monospace] font-normal tracking-widest"
+                          : item.style === "meme"
+                          ? `font-sans [font-family:Impact,sans-serif] font-black uppercase tracking-wider ${
+                              !item.hasBox ? "[text-shadow:_2px_2px_0px_#000]" : ""
+                            }`
+                          : item.style === "elegant"
+                          ? "[font-family:'Playfair_Display',serif] italic font-medium tracking-wide"
+                          : item.style === "directional"
+                          ? "[font-family:'Cinzel',serif] font-bold tracking-[0.2em] uppercase underline decoration-2 underline-offset-4"
+                          : item.style === "literature"
+                          ? "[font-family:'Playfair_Display',serif] font-normal tracking-normal"
+                          : "font-sans font-black tracking-tight"
+                      }`}
+                    >
                       {item.text}
                     </span>
                   </div>
@@ -1433,36 +1596,27 @@ export default function MainFeedPage() {
               })}
 
               {isDraggingText && (
-                <div 
+                <div
                   style={{ touchAction: "none" }}
-                  className="absolute bottom-6 sm:bottom-8 left-1/2 -translate-x-1/2 z-30 pointer-events-none flex flex-col items-center gap-1.5 animate-in fade-in slide-in-from-bottom-5 duration-150 ease-out"
+                  className="absolute bottom-24 sm:bottom-28 md:bottom-32 left-1/2 -translate-x-1/2 z-40 pointer-events-none flex items-center justify-center animate-in fade-in zoom-in-90 slide-in-from-bottom-4 duration-150 ease-out will-change-transform select-none"
                 >
-                  <div
-                    className={`relative flex items-center justify-center w-13 h-13 sm:w-15 sm:h-15 rounded-full transition-all duration-200 border ${
-                      isOverTrash
-                        ? "bg-rose-600 scale-125 border-rose-300 shadow-[0_0_30px_rgba(225,29,72,0.85)] ring-4 ring-rose-500/30"
-                        : "bg-black/75 backdrop-blur-xl border-white/20 scale-100 shadow-2xl ring-1 ring-white/10"
-                    }`}
-                  >
-                    <Trash2
-                      className={`w-5 h-5 sm:w-6 sm:h-6 transition-all duration-200 transform ${
-                        isOverTrash ? "text-white scale-115 rotate-12" : "text-zinc-300"
+                  <div className="relative flex items-center justify-center">
+                    <div
+                      className={`relative flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 md:w-15 md:h-15 rounded-full border transition-all duration-200 ease-out backdrop-blur-xl ${
+                        isOverTrash
+                          ? "scale-115 sm:scale-120 bg-zinc-900/90 dark:bg-zinc-100/90 text-white dark:text-zinc-950 border-zinc-700/80 dark:border-zinc-300/80 shadow-xl"
+                          : "scale-100 bg-zinc-950/75 dark:bg-black/75 text-zinc-300 dark:text-zinc-200 border-zinc-700/50 dark:border-zinc-800/80 shadow-lg"
                       }`}
-                    />
-                    {isOverTrash && (
-                      <span className="absolute inset-0 rounded-full animate-ping bg-rose-500/20 pointer-events-none" />
-                    )}
+                    >
+                      <Trash2
+                        className={`w-5 h-5 sm:w-6 sm:h-6 md:w-6.5 md:h-6.5 transition-all duration-150 ease-out stroke-[2] ${
+                          isOverTrash
+                            ? "scale-105 text-white dark:text-zinc-950"
+                            : "scale-100 text-zinc-300 dark:text-zinc-400"
+                        }`}
+                      />
+                    </div>
                   </div>
-                  
-                  <span
-                    className={`text-[10px] sm:text-[11px] font-mono tracking-wider px-3 py-0.5 rounded-full uppercase transition-all duration-150 shadow-sm ${
-                      isOverTrash
-                        ? "bg-rose-500/90 text-white font-extrabold shadow-rose-900/40"
-                        : "bg-black/60 text-zinc-300 backdrop-blur-sm border border-white/10"
-                    }`}
-                  >
-                    {isOverTrash ? "Drop to Remove" : "Drag Here to Remove"}
-                  </span>
                 </div>
               )}
 
@@ -1473,14 +1627,13 @@ export default function MainFeedPage() {
                     <button
                       type="button"
                       onClick={() => {
-                        const nextMode = (["boxed", "neon", "plain"] as const)[( (["boxed", "neon", "plain"].indexOf(textStyleMode) + 1) % 3 )];
-                        setTextStyleMode(nextMode);
-                        if (editingTextId) setStoryTexts((prev) => prev.map((t) => t.id === editingTextId ? { ...t, style: nextMode } : t));
+                        setIsTextEditing(false);
+                        setEditingTextId(null);
+                        setActiveInputText("");
                       }}
-                      className="text-xs font-mono font-bold px-3.5 py-1.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/20 text-white capitalize backdrop-blur-md transition active:scale-95 flex items-center gap-1.5"
+                      className="bg-transparent border-none p-0 text-sm sm:text-base font-medium text-white/85 hover:text-white dark:text-zinc-200 dark:hover:text-white transition-all active:scale-95 cursor-pointer outline-none ring-0 shadow-none"
                     >
-                      <span>Mode:</span>
-                      <span className="text-[#38BDF8] uppercase tracking-wider">{textStyleMode}</span>
+                      Cancel
                     </button>
                     <button
                       type="button"
@@ -1491,39 +1644,167 @@ export default function MainFeedPage() {
                     </button>
                   </div>
 
-                  <input
-                    type="text"
-                    autoFocus
-                    value={activeInputText}
-                    onChange={(e) => setActiveInputText(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleFinishText();
-                      }
-                    }}
-                    placeholder="Type campus vibe..."
-                    className={`w-full text-center text-xl sm:text-2xl transition-all duration-150 focus:outline-none ${getTextStyleClass(textStyleMode)}`}
-                  />
-
-                  <div className="flex items-center gap-2 py-3 px-2 overflow-x-auto scrollbar-none border-t border-white/10 select-none">
-                    {(["boxed", "classic", "neon", "gradient", "typewriter", "retro", "cyber", "soft", "gold", "italic", "outline", "bold"] as TextStyleType[]).map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => {
-                          setTextStyleMode(m);
-                          if (editingTextId) setStoryTexts((prev) => prev.map((t) => t.id === editingTextId ? { ...t, style: m } : t));
+                  <div className="flex-1 flex items-center justify-center w-full px-4 text-center">
+                    <div className="w-full text-center">
+                      <span
+                        contentEditable
+                        suppressContentEditableWarning
+                        role="textbox"
+                        autoFocus
+                        data-placeholder="Type campus vibe..."
+                        ref={(el) => {
+                          if (el && !el.dataset.ready) {
+                            el.innerText = activeInputText;
+                            el.dataset.ready = "true";
+                            // Cursor end par place karega
+                            const range = document.createRange();
+                            const sel = window.getSelection();
+                            range.selectNodeContents(el);
+                            range.collapse(false);
+                            sel?.removeAllRanges();
+                            sel?.addRange(range);
+                          }
                         }}
-                        className={`text-xs font-mono font-bold px-3.5 py-1.5 rounded-full capitalize whitespace-nowrap transition-all duration-150 shrink-0 ${
-                          textStyleMode === m 
-                            ? "bg-white text-black scale-105 shadow-lg" 
-                            : "text-zinc-400 hover:text-white bg-white/10"
+                        onInput={(e) => setActiveInputText(e.currentTarget.innerText)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" && !e.shiftKey) {
+                            e.preventDefault();
+                            document.execCommand("insertLineBreak");
+                            handleFinishText();
+                          }
+                        }}
+                        style={{ 
+                          lineHeight: 1.35, 
+                          whiteSpace: "pre-wrap",
+                          backgroundColor: textHasBox ? (selectedTextColor || "#09090b") : "transparent",
+                          color: textHasBox 
+                            ? (["#ffffff", "#eab308", "#fde047"].includes((selectedTextColor || "").toLowerCase()) ? "#09090b" : "#ffffff") 
+                            : (selectedTextColor || "#ffffff"),
+                        }}
+                        className={`inline text-center text-xl sm:text-2xl outline-none border-none ring-0 max-w-[85%] break-words whitespace-pre-wrap leading-[1.3] [box-decoration-break:clone] [-webkit-box-decoration-break:clone] ${
+                          textHasBox
+                            ? "px-3.5 py-1.5 rounded-2xl shadow-none"
+                            : "drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] px-2 py-1"
+                        } ${
+                          textStyleMode === "modern" ? "[font-family:'Oswald',sans-serif] font-medium uppercase" :
+                          textStyleMode === "signature" ? "[font-family:'Caveat',cursive] font-semibold" :
+                          textStyleMode === "editor" ? "[font-family:'Courier_Prime',monospace] font-bold" :
+                          textStyleMode === "poster" ? "[font-family:Georgia,serif] font-black italic uppercase" :
+                          textStyleMode === "bubble" ? "[font-family:'Comfortaa',cursive] font-bold" :
+                          textStyleMode === "deco" ? "[font-family:'Montserrat',sans-serif] tracking-[0.2em] uppercase" :
+                          textStyleMode === "squeeze" ? "[font-family:'Bebas_Neue',sans-serif] uppercase" :
+                          textStyleMode === "strong" ? "font-sans [font-family:Impact,sans-serif] italic uppercase" :
+                          textStyleMode === "typewriter" ? "[font-family:'Courier_Prime',monospace]" :
+                          textStyleMode === "meme" ? "[font-family:Impact,sans-serif] font-black uppercase" :
+                          textStyleMode === "elegant" ? "[font-family:'Playfair_Display',serif] italic font-medium" :
+                          textStyleMode === "directional" ? "[font-family:'Cinzel',serif] font-bold uppercase underline" :
+                          textStyleMode === "literature" ? "[font-family:'Playfair_Display',serif]" :
+                          "font-sans font-bold"
+                        }`}
+                      />
+                      </div>
+                  </div>
+
+                  <div className="w-full py-2 sm:py-3 px-2 sm:px-4 border-t border-white/10 select-none backdrop-blur-2xl bg-black/40">
+  
+                    {/* 🎨 HORIZONTAL COLOR PALETTE (Rainbow Circle par click karne se aayega) */}
+                    {isColorPickerOpen && (
+                      <div className="w-full pb-3 px-1 flex items-center justify-center gap-3 overflow-x-auto scrollbar-none animate-in fade-in slide-in-from-bottom-2 duration-150">
+                        {/* Pipette / Eyedropper Custom Color Input */}
+                        <label
+                          title="Custom Color"
+                          className="relative w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white flex items-center justify-center cursor-pointer shadow-md shrink-0 border border-zinc-300 active:scale-95 transition"
+                        >
+                          <input
+                            type="color"
+                            value={selectedTextColor}
+                            onChange={(e) => setSelectedTextColor(e.target.value)}
+                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                          />
+                          <Pipette className="w-4 h-4 text-zinc-900" />
+                        </label>
+
+                        {/* Instagram 9 Signature Colors */}
+                        {["#ffffff", "#000000", "#38bdf8", "#22c55e", "#eab308", "#f97316", "#ef4444", "#ec4899", "#a855f7"].map((c) => (
+                          <button
+                            key={c}
+                            type="button"
+                            onClick={() => setSelectedTextColor(c)}
+                            style={{ backgroundColor: c }}
+                            className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 border-2 transition-all duration-150 active:scale-90 ${
+                              selectedTextColor.toLowerCase() === c.toLowerCase() ? "scale-115 border-white shadow-lg" : "border-white/30 hover:border-white/70"
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto scrollbar-none py-1">
+                      {/* 'A' Background Box Toggle Button */}
+                      <button
+                        type="button"
+                        title="Toggle Text Background"
+                        onClick={() => {
+                          const nextBox = !textHasBox;
+                          setTextHasBox(nextBox);
+                          if (editingTextId) {
+                            setStoryTexts((prev: any) =>
+                              prev.map((t: any) => (t.id === editingTextId ? { ...t, hasBox: nextBox } : t))
+                            );
+                          }
+                        }}
+                        className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-[6px] sm:rounded-[7px] flex items-center justify-center transition-all duration-150 active:scale-90 select-none ${
+                          textHasBox
+                            ? "bg-white text-zinc-950 shadow-sm"
+                            : "bg-[#262626] text-white hover:bg-[#333333]"
                         }`}
                       >
-                        {m}
+                        <span className="font-sans font-bold text-xs sm:text-[13px] leading-none">A</span>
                       </button>
-                    ))}
+
+                      {/* 🌈 RAINBOW COLOR WHEEL BUTTON (Between 'A' & Fonts) */}
+                      <button
+                        type="button"
+                        title="Color Picker"
+                        onClick={() => setIsColorPickerOpen((prev) => !prev)}
+                        style={{
+                          background: "conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)",
+                        }}
+                        className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full flex items-center justify-center p-[2px] transition-all duration-150 active:scale-90 cursor-pointer ${
+                          isColorPickerOpen ? "scale-110 ring-2 ring-white" : ""
+                        }`}
+                      >
+                        <div 
+                          className="w-full h-full rounded-full border border-black/30" 
+                          style={{ backgroundColor: selectedTextColor }} 
+                        />
+                      </button>
+
+                      <div className="h-5 w-[1px] bg-white/20 shrink-0 mx-0.5" />
+
+                      {/* Font Styles ("classic", "modern", etc.) */}
+                      {(["classic", "modern", "signature", "editor", "poster", "bubble", "deco", "squeeze", "strong", "typewriter", "meme", "elegant", "directional", "literature"] as const).map((m) => (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => {
+                            setTextStyleMode(m);
+                            if (editingTextId) {
+                              setStoryTexts((prev: any) =>
+                                prev.map((t: any) => (t.id === editingTextId ? { ...t, style: m } : t))
+                              );
+                            }
+                          }}
+                          className={`text-[10px] sm:text-[11px] font-sans font-bold px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full capitalize whitespace-nowrap transition-all duration-150 ease-out shrink-0 select-none ${
+                            textStyleMode === m
+                              ? "bg-white text-zinc-950 shadow-sm scale-100"
+                              : "bg-[#262626] text-zinc-300 hover:text-white hover:bg-[#333333] active:scale-95"
+                          }`}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
