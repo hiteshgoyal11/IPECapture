@@ -67,6 +67,15 @@ interface Story {
 }
 
 export default function MainFeedPage() {
+  // 🎯 Real Instagram Auto-Contrast (YIQ Brightness Formula)
+  const getContrastColor = (hex: string) => {
+    const cleanHex = (hex || "#000000").replace("#", "");
+    const r = parseInt(cleanHex.substring(0, 2), 16) || 0;
+    const g = parseInt(cleanHex.substring(2, 4), 16) || 0;
+    const b = parseInt(cleanHex.substring(4, 6), 16) || 0;
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000;
+    return brightness >= 145 ? "#000000" : "#ffffff";
+  };
   // Open editor for a brand new text
   const handleAddNewText = () => {
     // handleAddNewText me:
@@ -197,6 +206,7 @@ export default function MainFeedPage() {
   const [isTextEditing, setIsTextEditing] = useState(false);
   const [selectedTextColor, setSelectedTextColor] = useState<string>("#09090b");
   const [isColorPickerOpen, setIsColorPickerOpen] = useState<boolean>(false);
+  const [colorPalettePage, setColorPalettePage] = useState<number>(0); // 0 = Dot 1, 1 = Dot 2, 2 = Dot 3
   useEffect(() => {
     if (isTextEditing) {
       const el = document.querySelector("[contenteditable]");
@@ -1507,6 +1517,8 @@ export default function MainFeedPage() {
                 const isOverTrashZone = isDraggingText && item.y > 78 && Math.abs(item.x - 50) < 22;
                 const currentScale = item.scale || 1;
 
+                if (isTextEditing && editingTextId === item.id) return null;
+
                 return (
                   <div
                     key={item.id || `story-text-layer-${index}`}
@@ -1516,20 +1528,21 @@ export default function MainFeedPage() {
                       el.onwheel = (e: WheelEvent) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        const zoomFactor = e.deltaY < 0 ? 1.05 : 0.95;
                         setStoryTexts((prev) =>
-                          prev.map((t) =>
-                            t.id === item.id
-                              ? { ...t, scale: Math.min(4.5, Math.max(0.4, (t.scale || 1) * zoomFactor)) }
-                              : t
-                          )
+                          prev.map((t) => {
+                            if (t.id !== item.id) return t;
+                            if (e.shiftKey) {
+                              return { ...t, rotation: ((t as any).rotation || 0) + (e.deltaY < 0 ? 6 : -6) }; // 🔄 Shift + Scroll se rotate
+                            }
+                            return { ...t, scale: Math.min(4.5, Math.max(0.4, (t.scale || 1) * (e.deltaY < 0 ? 1.06 : 0.94))) };
+                          })
                         );
                       };
                     }}
                     style={{
                       left: `${item.x}%`,
                       top: `${item.y}%`,
-                      transform: `translate(-50%, -50%) scale(${currentScale * (isOverTrashZone ? 0.72 : 1)}) rotate(${isOverTrashZone ? -6 : 0}deg)`,
+                      transform: `translate(-50%, -50%) scale(${currentScale * (isOverTrashZone ? 0.72 : 1)}) rotate(${((item as any).rotation || 0) + (isOverTrashZone ? -6 : 0)}deg)`,
                       touchAction: "none",
                     }}
                     className="absolute z-20 cursor-grab active:cursor-grabbing select-none text-center w-full max-w-[86%] sm:max-w-[80%] md:max-w-[75%] pointer-events-auto will-change-transform transition-transform duration-75"
@@ -1550,7 +1563,13 @@ export default function MainFeedPage() {
                           ? (item?.color || selectedTextColor || "#09090b") 
                           : "transparent",
                         color: (item?.hasBox ?? textHasBox)
-                          ? (["#ffffff", "#eab308", "#fde047"].includes((item?.color || selectedTextColor || "").toLowerCase()) ? "#09090b" : "#ffffff")
+                          ? ((hex) => {
+                              const h = (hex || "#000000").replace("#", "");
+                              const r = parseInt(h.substring(0, 2), 16) || 0;
+                              const g = parseInt(h.substring(2, 4), 16) || 0;
+                              const b = parseInt(h.substring(4, 6), 16) || 0;
+                              return (r * 299 + g * 587 + b * 114) / 1000 >= 145 ? "#000000" : "#ffffff";
+                            })(item?.color || selectedTextColor || "#09090b")
                           : (item?.color || selectedTextColor || "#ffffff"),
                       }}
                       className={`inline text-center text-xl sm:text-2xl outline-none border-none ring-0 max-w-[85%] break-words whitespace-pre-wrap box-decoration-clone ${
@@ -1677,8 +1696,14 @@ export default function MainFeedPage() {
                           lineHeight: 1.35, 
                           whiteSpace: "pre-wrap",
                           backgroundColor: textHasBox ? (selectedTextColor || "#09090b") : "transparent",
-                          color: textHasBox 
-                            ? (["#ffffff", "#eab308", "#fde047"].includes((selectedTextColor || "").toLowerCase()) ? "#09090b" : "#ffffff") 
+                          color: textHasBox
+                            ? ((hex) => {
+                                const h = (hex || "#000000").replace("#", "");
+                                const r = parseInt(h.substring(0, 2), 16) || 0;
+                                const g = parseInt(h.substring(2, 4), 16) || 0;
+                                const b = parseInt(h.substring(4, 6), 16) || 0;
+                                return (r * 299 + g * 587 + b * 114) / 1000 >= 145 ? "#000000" : "#ffffff";
+                              })(selectedTextColor)
                             : (selectedTextColor || "#ffffff"),
                         }}
                         className={`inline text-center text-xl sm:text-2xl outline-none border-none ring-0 max-w-[85%] break-words whitespace-pre-wrap leading-[1.3] [box-decoration-break:clone] [-webkit-box-decoration-break:clone] ${
@@ -1705,106 +1730,159 @@ export default function MainFeedPage() {
                       </div>
                   </div>
 
-                  <div className="w-full py-2 sm:py-3 px-2 sm:px-4 border-t border-white/10 select-none backdrop-blur-2xl bg-black/40">
   
-                    {/* 🎨 HORIZONTAL COLOR PALETTE (Rainbow Circle par click karne se aayega) */}
-                    {isColorPickerOpen && (
-                      <div className="w-full pb-3 px-1 flex items-center justify-center gap-3 overflow-x-auto scrollbar-none animate-in fade-in slide-in-from-bottom-2 duration-150">
-                        {/* Pipette / Eyedropper Custom Color Input */}
-                        <label
-                          title="Custom Color"
-                          className="relative w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white flex items-center justify-center cursor-pointer shadow-md shrink-0 border border-zinc-300 active:scale-95 transition"
+                  {/* 🎨 HORIZONTAL COLOR PALETTE (Rainbow Circle par click karne se aayega) */}
+                  {/* 🎨 INSTAGRAM 3-PAGE COLOR PALETTE WITH < > & 3 DOTS */}
+                  {isColorPickerOpen && (
+                    <div className="w-full max-w-sm sm:max-w-md mx-auto pb-3 flex flex-col items-center justify-center gap-1.5 select-none">
+                      
+                      {/* Swatches Row with Very Small < > Arrows */}
+                      <div className="flex items-center justify-center gap-1.5 sm:gap-2.5 w-full max-w-sm px-1">
+                        
+                        {/* Left Chevron < (Page 1 par lock/dimmed) */}
+                        <button
+                          type="button"
+                          disabled={colorPalettePage === 0}
+                          onClick={() => setColorPalettePage((p) => Math.max(0, p - 1))}
+                          className={`p-0.5 transition-all active:scale-90 ${
+                            colorPalettePage === 0 
+                              ? "opacity-20 cursor-not-allowed text-zinc-500" 
+                              : "text-white/90 hover:text-white cursor-pointer hover:scale-110"
+                          }`}
                         >
-                          <input
-                            type="color"
-                            value={selectedTextColor}
-                            onChange={(e) => setSelectedTextColor(e.target.value)}
-                            className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                          />
-                          <Pipette className="w-4 h-4 text-zinc-900" />
-                        </label>
+                          <ChevronLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+                        </button>
 
-                        {/* Instagram 9 Signature Colors */}
-                        {["#ffffff", "#000000", "#38bdf8", "#22c55e", "#eab308", "#f97316", "#ef4444", "#ec4899", "#a855f7"].map((c) => (
-                          <button
-                            key={c}
-                            type="button"
-                            onClick={() => setSelectedTextColor(c)}
-                            style={{ backgroundColor: c }}
-                            className={`w-6 h-6 sm:w-7 sm:h-7 rounded-full shrink-0 border-2 transition-all duration-150 active:scale-90 ${
-                              selectedTextColor.toLowerCase() === c.toLowerCase() ? "scale-115 border-white shadow-lg" : "border-white/30 hover:border-white/70"
+                        {/* Unique Non-Repeating Swatches (9 Colors per Page) */}
+                        <div className="flex items-center justify-center gap-1.5 sm:gap-2">
+                          {(
+                            colorPalettePage === 0
+                              ? ["#ffffff", "#000000", "#38bdf8", "#22c55e", "#f59e0b", "#f97316", "#ef4444", "#ec4899", "#a855f7"] // Page 1: Classic Rainbow
+                              : colorPalettePage === 1
+                              ? ["#d4a373", "#78350f", "#6ee7b7", "#c084fc", "#fb7185", "#93c5fd", "#fdba74", "#86efac", "#e879f9"] // Page 2: Warm Sand, Brown & Pastels
+                              : ["#06b6d4", "#84cc16", "#991b1b", "#047857", "#ca8a04", "#d946ef", "#1d4ed8", "#65a30d", "#312e81"] // Page 3: Neon, Deep Earth & Jewel
+                          ).map((c) => (
+                            <button
+                              key={c}
+                              type="button"
+                              onClick={() => {
+                                setSelectedTextColor(c);
+                                if (editingTextId) {
+                                  setStoryTexts((prev) => prev.map((t) => t.id === editingTextId ? { ...t, color: c } : t));
+                                }
+                              }}
+                              style={{ backgroundColor: c }}
+                              className={`w-5 h-5 sm:w-6 sm:h-6 rounded-full shrink-0 border-2 transition-all duration-150 active:scale-90 ${
+                                selectedTextColor.toLowerCase() === c.toLowerCase()
+                                  ? "scale-115 border-white shadow-md ring-1 ring-black/40"
+                                  : "border-white/30 hover:border-white/70"
+                              }`}
+                            />
+                          ))}
+                        </div>
+
+                        {/* Right Chevron > (Page 3 par lock/dimmed) */}
+                        <button
+                          type="button"
+                          disabled={colorPalettePage === 2}
+                          onClick={() => setColorPalettePage((p) => Math.min(2, p + 1))}
+                          className={`p-0.5 transition-all active:scale-90 ${
+                            colorPalettePage === 2 
+                              ? "opacity-20 cursor-not-allowed text-zinc-500" 
+                              : "text-white/90 hover:text-white cursor-pointer hover:scale-110"
+                          }`}
+                        >
+                          <ChevronRight className="w-3.5 h-3.5 sm:w-4 sm:h-4 stroke-[2.5]" />
+                        </button>
+                      </div>
+
+                      {/* 3 Pagination Indicator Dots */}
+                      <div className="flex items-center justify-center gap-1.5 pt-0.5">
+                        {[0, 1, 2].map((dotIdx) => (
+                          <span
+                            key={dotIdx}
+                            onClick={() => setColorPalettePage(dotIdx)}
+                            className={`h-1 rounded-full transition-all duration-200 cursor-pointer ${
+                              colorPalettePage === dotIdx
+                                ? "w-2.5 bg-white shadow-sm"
+                                : "w-1 bg-white/35 hover:bg-white/60"
                             }`}
                           />
                         ))}
                       </div>
-                    )}
 
-                    <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto scrollbar-none py-1">
-                      {/* 'A' Background Box Toggle Button */}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 sm:gap-3 overflow-x-auto scrollbar-none py-1">
+                    {/* 'A' Background Box Toggle Button */}
+                    <button
+                      type="button"
+                      title="Toggle Text Background"
+                      onClick={() => {
+                        const nextBox = !textHasBox;
+                        setTextHasBox(nextBox);
+                        if (editingTextId) {
+                          setStoryTexts((prev: any) =>
+                            prev.map((t: any) => (t.id === editingTextId ? { ...t, hasBox: nextBox } : t))
+                          );
+                        }
+                      }}
+                      style={textHasBox ? {
+                        backgroundColor: selectedTextColor || "#000000",
+                        color: ["#ffffff", "#eab308", "#fde047"].includes((selectedTextColor || "").toLowerCase()) ? "#000000" : "#ffffff",
+                      } : undefined}
+                      className={`w-6 h-6 sm:w-6.5 sm:h-6.5 shrink-0 rounded-[7px] flex items-center justify-center transition-all duration-150 active:scale-90 select-none ${
+                        textHasBox
+                          ? "shadow-md border border-white/25"
+                          : "border-[1.8px] border-white text-white bg-transparent"
+                      }`}
+                    >
+                      <span className="font-sans font-bold text-xs sm:text-[13px] leading-none">A</span>
+                    </button>
+
+                    {/* 🌈 RAINBOW COLOR WHEEL BUTTON (Between 'A' & Fonts) */}
+                    <button
+                      type="button"
+                      title="Color Picker"
+                      onClick={() => setIsColorPickerOpen((prev) => !prev)}
+                      style={{
+                        background: "conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)",
+                      }}
+                      className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full flex items-center justify-center p-[2px] transition-all duration-150 active:scale-90 cursor-pointer ${
+                        isColorPickerOpen ? "scale-110 ring-2 ring-white" : ""
+                      }`}
+                    >
+                      <div 
+                        className="w-full h-full rounded-full border border-black/30" 
+                        style={{ backgroundColor: selectedTextColor }} 
+                      />
+                    </button>
+
+                    <div className="h-5 w-[1px] bg-white/20 shrink-0 mx-0.5" />
+
+                    {/* Font Styles ("classic", "modern", etc.) */}
+                    {(["classic", "modern", "signature", "editor", "poster", "bubble", "deco", "squeeze", "strong", "typewriter", "meme", "elegant", "directional", "literature"] as const).map((m) => (
                       <button
+                        key={m}
                         type="button"
-                        title="Toggle Text Background"
                         onClick={() => {
-                          const nextBox = !textHasBox;
-                          setTextHasBox(nextBox);
+                          setTextStyleMode(m);
                           if (editingTextId) {
                             setStoryTexts((prev: any) =>
-                              prev.map((t: any) => (t.id === editingTextId ? { ...t, hasBox: nextBox } : t))
+                              prev.map((t: any) => (t.id === editingTextId ? { ...t, style: m } : t))
                             );
                           }
                         }}
-                        className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-[6px] sm:rounded-[7px] flex items-center justify-center transition-all duration-150 active:scale-90 select-none ${
-                          textHasBox
-                            ? "bg-white text-zinc-950 shadow-sm"
-                            : "bg-[#262626] text-white hover:bg-[#333333]"
+                        className={`text-[10px] sm:text-[11px] font-sans font-bold px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full capitalize whitespace-nowrap transition-all duration-150 ease-out shrink-0 select-none ${
+                          textStyleMode === m
+                            ? "bg-white text-zinc-950 shadow-sm scale-100"
+                            : "bg-[#262626] text-zinc-300 hover:text-white hover:bg-[#333333] active:scale-95"
                         }`}
                       >
-                        <span className="font-sans font-bold text-xs sm:text-[13px] leading-none">A</span>
+                        {m}
                       </button>
-
-                      {/* 🌈 RAINBOW COLOR WHEEL BUTTON (Between 'A' & Fonts) */}
-                      <button
-                        type="button"
-                        title="Color Picker"
-                        onClick={() => setIsColorPickerOpen((prev) => !prev)}
-                        style={{
-                          background: "conic-gradient(from 0deg, red, yellow, lime, aqua, blue, magenta, red)",
-                        }}
-                        className={`w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-full flex items-center justify-center p-[2px] transition-all duration-150 active:scale-90 cursor-pointer ${
-                          isColorPickerOpen ? "scale-110 ring-2 ring-white" : ""
-                        }`}
-                      >
-                        <div 
-                          className="w-full h-full rounded-full border border-black/30" 
-                          style={{ backgroundColor: selectedTextColor }} 
-                        />
-                      </button>
-
-                      <div className="h-5 w-[1px] bg-white/20 shrink-0 mx-0.5" />
-
-                      {/* Font Styles ("classic", "modern", etc.) */}
-                      {(["classic", "modern", "signature", "editor", "poster", "bubble", "deco", "squeeze", "strong", "typewriter", "meme", "elegant", "directional", "literature"] as const).map((m) => (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => {
-                            setTextStyleMode(m);
-                            if (editingTextId) {
-                              setStoryTexts((prev: any) =>
-                                prev.map((t: any) => (t.id === editingTextId ? { ...t, style: m } : t))
-                              );
-                            }
-                          }}
-                          className={`text-[10px] sm:text-[11px] font-sans font-bold px-2.5 sm:px-3 py-1 sm:py-1.5 rounded-full capitalize whitespace-nowrap transition-all duration-150 ease-out shrink-0 select-none ${
-                            textStyleMode === m
-                              ? "bg-white text-zinc-950 shadow-sm scale-100"
-                              : "bg-[#262626] text-zinc-300 hover:text-white hover:bg-[#333333] active:scale-95"
-                          }`}
-                        >
-                          {m}
-                        </button>
-                      ))}
-                    </div>
+                    ))}
                   </div>
                 </div>
               )}
