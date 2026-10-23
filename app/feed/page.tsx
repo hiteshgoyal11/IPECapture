@@ -34,6 +34,7 @@ import MobileNav from "./components/mobile-nav";
 import FeedSkeleton from "./components/feed-skeleton";
 import UserAvatar from "./components/user-avatar";
 import { supabase } from "../../lib/supabase";
+import StoryMentionModal from "./components/story-mention-modal";
 
 export type TextStyleType = 
   | "classic" | "boxed" | "neon" | "gradient" | "typewriter" 
@@ -204,6 +205,8 @@ export default function MainFeedPage() {
   const [activeInputText, setActiveInputText] = useState("");
   const [textStyleMode, setTextStyleMode] = useState<any>("boxed"); // 👈 Yahan <any> likh dein
   const [isTextEditing, setIsTextEditing] = useState(false);
+  const [isMentionModalOpen, setIsMentionModalOpen] = useState(false);
+  const [mentionModalTab, setMentionModalTab] = useState<"mention" | "location">("mention");
   const [selectedTextColor, setSelectedTextColor] = useState<string>("#09090b");
   const [isColorPickerOpen, setIsColorPickerOpen] = useState<boolean>(false);
   const [colorPalettePage, setColorPalettePage] = useState<number>(0); // 0 = Dot 1, 1 = Dot 2, 2 = Dot 3
@@ -394,7 +397,11 @@ export default function MainFeedPage() {
         );
       } else {
         // 3. Simple Click/Tap Interaction -> Trigger In-place Text Editing Studio
-        handleEditText(currentItem);
+        if (currentItem.text.startsWith("@")) {
+          setIsMentionModalOpen(true); // Mention hai to StoryMentionModal khulega
+        } else {
+          handleEditText(currentItem); // Normal text hai to Normal Editor khulega
+        }
       }
     };
 
@@ -404,16 +411,6 @@ export default function MainFeedPage() {
   };
   const [storyBadge, setStoryBadge] = useState<string | null>(null);
   const [storyFilter, setStoryFilter] = useState<"Original" | "grayscale" | "warm">("Original");
-
-  // Real IPEC Campus Location Badges (Icons based, no stickers)
-  const IPEC_BADGES = [
-    "📍 Nescafe Corner",
-    "📍 Central Lawn",
-    "📍 Maggi Point",
-    "📍 Block A Lab 3",
-    "☕ Free Lecture Vibe",
-    "⚡ Hackathon Sprint",
-  ];
 
   // 1. File select hote hi direct upload nahi hoga -> Editor open hoga
   // ✅ 1. Editor HAMESHA turant khulega (No Block):
@@ -1890,23 +1887,23 @@ export default function MainFeedPage() {
 
             {/* Bottom Bar: Badges Picker & "Post Story" Button */}
             <div className="p-4 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent space-y-3">
-              
-              {/* Horizontal Scrollable Campus Badges */}
-              <div className="flex gap-2 overflow-x-auto scrollbar-none py-1">
-                {IPEC_BADGES.map((b) => (
-                  <button
-                    key={b}
-                    type="button"
-                    onClick={() => setStoryBadge(b)}
-                    className={`px-3 py-1 rounded-full text-[11px] font-mono whitespace-nowrap transition ${
-                      storyBadge === b
-                        ? "bg-[#0284C7] text-white font-bold shadow-md"
-                        : "bg-black/50 hover:bg-black/80 text-zinc-200 border border-zinc-700/60 backdrop-blur-md"
-                    }`}
-                  >
-                    {b}
-                  </button>
-                ))}
+
+              {/* Mention & Location Bar */}
+              <div className="flex items-center justify-center gap-12 sm:gap-16 py-1 select-none">
+                {/* 1. Mention */}
+                <button type="button" onClick={() => { setMentionModalTab("mention"); setIsMentionModalOpen(true); }} className="flex items-center gap-1.5 text-white active:scale-95 transition cursor-pointer">
+                  <span className="font-sans font-bold text-[17px] leading-none text-white -mt-[1px]">@</span>
+                  <span className="font-sans font-medium text-[13px] leading-none">Mention</span>
+                </button>
+
+                {/* 2. Location */}
+                <button type="button" onClick={() => { setMentionModalTab("location"); setIsMentionModalOpen(true); }} className="flex items-center gap-1.5 text-white active:scale-95 transition cursor-pointer">
+                  <svg className="w-[18px] h-[18px] text-white shrink-0 stroke-[2]" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                    <path d="M12 21c3.5-4.5 6.5-8.5 6.5-12a6.5 6.5 0 1 0-13 0c0 3.5 3 7.5 6.5 12z" strokeLinecap="round" strokeLinejoin="round" />
+                    <circle cx="12" cy="9" r="1.5" fill="currentColor" stroke="none" />
+                  </svg>
+                  <span className="font-sans font-medium text-[13px] leading-none">Location</span>
+                </button>
               </div>
 
               {/* Post Story Primary Button */}
@@ -1919,6 +1916,29 @@ export default function MainFeedPage() {
                 <Send className="w-3.5 h-3.5" />
               </button>
             </div>
+
+            {/* 📍 @Mention & Location Instagram Modal */}
+            <StoryMentionModal
+              isOpen={isMentionModalOpen}
+              initialTab={mentionModalTab}
+              onClose={() => setIsMentionModalOpen(false)}
+              onSelectMention={(mention) => {
+                const newItem = {
+                  id: "txt_" + Date.now().toString(),
+                  text: mention.text,
+                  x: 50,
+                  y: 45,
+                  scale: 1,
+                  hasBox: mention.hasBox,
+                  style: mention.style,
+                  color: "#09090b",
+                };
+                setStoryTexts((prev) => [...prev, newItem]);
+              }}
+              onSelectLocation={(loc) => {
+                setStoryBadge(loc);
+              }}
+            />
 
           </div>
         </div>
