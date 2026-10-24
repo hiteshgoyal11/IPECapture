@@ -781,15 +781,17 @@ export default function MainFeedPage() {
   // Share Sheet State taaki Share par bhi timer ruke
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
 
-  // Story Options Menu State
+  // Story Options Menu & Delete Confirmation States
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
+  const [isDeletingStory, setIsDeletingStory] = useState(false);
 
   // Report Modal States (Timer pauses while reporting)
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [reportStep, setReportStep] = useState<"reasons" | "success">("reasons");
 
   // Timer Freeze: Report karte waqt bhi timer 100% freeze rahega
-  const isTimerPaused = isViewersSheetOpen || isCommentsSheetOpen || isShareModalOpen || isMenuOpen || isReportModalOpen;
+  const isTimerPaused = isViewersSheetOpen || isCommentsSheetOpen || isShareModalOpen || isMenuOpen || isReportModalOpen || isDeleteConfirmOpen;
 
   // IPEC Campus Specific Unique Report Reasons (Not copy-pasted Instagram text)
   const CAMPUS_REPORT_REASONS = [
@@ -1099,31 +1101,51 @@ export default function MainFeedPage() {
     }
   };
 
-  // ✅ Real Permanent Story Deletion (Database se 100% delete)
-  const handleDeleteStory = async () => {
+  // ✅ 1. Confirmation Modal Open karega
+  const openDeleteConfirmation = () => {
+    setIsMenuOpen(false);
+    setIsDeleteConfirmOpen(true);
+  };
+
+  // ✅ 2. Confirm hone par hi Database se permanently delete karega
+  const handleConfirmDelete = async () => {
     if (!currentStory) return;
+    setIsDeletingStory(true);
     try {
-      // 1. Pehle linked views, likes aur comments delete karein (Constraint block na kare)
       await Promise.allSettled([
         supabase.from("story_views").delete().eq("story_id", currentStory.id),
         supabase.from("story_likes").delete().eq("story_id", currentStory.id),
         supabase.from("story_comments").delete().eq("story_id", currentStory.id),
       ]);
 
-      // 2. Main story ko database se permanently delete karein
       const { error } = await supabase.from("stories").delete().eq("id", currentStory.id);
-      if (error) {
-        console.error("❌ Story DB Delete Failed:", error.message);
-        alert("Delete failed: " + error.message);
-        return;
-      }
+      if (error) throw error;
 
-      // 3. UI state se remove karein
-      setStories((prev) => prev.filter((s) => s.id !== currentStory.id));
-      setIsMenuOpen(false);
-      goToNextStory();
-    } catch (err) {
+      const deletedId = currentStory.id;
+      const remainingUserStories = currentActiveUserStories.filter((s) => s.id !== deletedId);
+
+      setStories((prev) => prev.filter((s) => s.id !== deletedId));
+      setIsDeleteConfirmOpen(false);
+      setStoryProgress(0);
+
+      if (remainingUserStories.length > 0) {
+        if (currentStoryIndex >= remainingUserStories.length) {
+          setCurrentStoryIndex(remainingUserStories.length - 1);
+        }
+      } else {
+        if (currentUserQueueIndex < orderedStoryUsers.length - 1) {
+          setActiveStoryUsername(orderedStoryUsers[currentUserQueueIndex + 1]);
+          setCurrentStoryIndex(0);
+        } else {
+          setActiveStoryUsername(null);
+          setCurrentStoryIndex(0);
+        }
+      }
+    } catch (err: any) {
       console.error("Story delete error:", err);
+      alert("Delete failed: " + (err.message || "Unknown error"));
+    } finally {
+      setIsDeletingStory(false);
     }
   };
 
@@ -2655,7 +2677,7 @@ export default function MainFeedPage() {
                           <>
                             <button
                               type="button"
-                              onClick={handleDeleteStory}
+                              onClick={openDeleteConfirmation}
                               className="w-full py-3 text-xs font-bold text-rose-500 hover:bg-rose-950/30 rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -2710,6 +2732,63 @@ export default function MainFeedPage() {
                         >
                           Cancel
                         </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ========================================================= */}
+                  {/* DELETE CONFIRMATION DIALOG (Auto Dark/Light, Vector Icons) */}
+                  {/* ========================================================= */}
+                  {isDeleteConfirmOpen && (
+                    <div 
+                      onClick={() => !isDeletingStory && setIsDeleteConfirmOpen(false)}
+                      className="absolute inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in duration-150 select-none"
+                    >
+                      <div 
+                        onClick={(e) => e.stopPropagation()}
+                        className="w-full max-w-[290px] sm:max-w-xs rounded-3xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 p-5 shadow-2xl text-center space-y-4 animate-in zoom-in-95 duration-150"
+                      >
+                        {/* Red Trash Icon */}
+                        <div className="w-12 h-12 rounded-full bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900/60 text-rose-600 dark:text-rose-400 flex items-center justify-center mx-auto shadow-inner">
+                          <Trash2 className="w-5 h-5 stroke-[2.2]" />
+                        </div>
+
+                        <div className="space-y-1">
+                          <h3 className="text-sm font-bold text-zinc-950 dark:text-zinc-50">
+                            Delete this story?
+                          </h3>
+                          <p className="text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                            This story will be permanently removed from your 24h campus stories.
+                          </p>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex flex-col gap-2 pt-1">
+                          <button
+                            type="button"
+                            disabled={isDeletingStory}
+                            onClick={handleConfirmDelete}
+                            className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 active:scale-[0.99] text-white text-xs font-bold shadow-md transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                          >
+                            {isDeletingStory ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Deleting...</span>
+                              </>
+                            ) : (
+                              <span>Delete</span>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            disabled={isDeletingStory}
+                            onClick={() => setIsDeleteConfirmOpen(false)}
+                            className="w-full py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-700 dark:text-zinc-300 text-xs font-semibold transition cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
