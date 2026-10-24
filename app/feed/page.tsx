@@ -32,6 +32,7 @@ import LeftSidebar from "./components/left-sidebar";
 import RightSidebar from "./components/right-sidebar";
 import MobileNav from "./components/mobile-nav";
 import FeedSkeleton from "./components/feed-skeleton";
+import StoryCanvasViewport from "./components/story-canvas-viewport";
 import UserAvatar from "./components/user-avatar";
 import { supabase } from "../../lib/supabase";
 import StoryMentionModal from "./components/story-mention-modal";
@@ -396,11 +397,16 @@ export default function MainFeedPage() {
           )
         );
       } else {
-        // 3. Simple Click/Tap Interaction -> Trigger In-place Text Editing Studio
         if (currentItem.text.startsWith("@")) {
-          setIsMentionModalOpen(true); // Mention hai to StoryMentionModal khulega
+          setEditingTextId(currentItem.id); // 👈 Clicked mention ki ID save karega
+          setMentionModalTab("mention");
+          setIsMentionModalOpen(true);
+        } else if (currentItem.style === "location") {
+          setEditingTextId(currentItem.id); // 👈 Clicked location ki ID save karega
+          setMentionModalTab("location");
+          setIsMentionModalOpen(true);
         } else {
-          handleEditText(currentItem); // Normal text hai to Normal Editor khulega
+          handleEditText(currentItem);
         }
       }
     };
@@ -492,10 +498,29 @@ export default function MainFeedPage() {
       }
 
       // 3. Aspect Ratio Preserved Center Draw
-      const scale = Math.max(canvas.width / img.width, canvas.height / img.height);
-      const drawX = (canvas.width - img.width * scale) / 2;
-      const drawY = (canvas.height - img.height * scale) / 2;
-      ctx.drawImage(img, drawX, drawY, img.width * scale, img.height * scale);
+      // 1. IPEC Navy Gradient Background
+      const bgGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      bgGrad.addColorStop(0, "#06101e");
+      bgGrad.addColorStop(0.5, "#0F2952");
+      bgGrad.addColorStop(1, "#040914");
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // 2. Center Card Natural Aspect-Ratio (No Crop, No Zoom)
+      const maxW = canvas.width * 0.9;
+      const maxH = canvas.height * 0.72;
+      const scale = Math.min(maxW / img.width, maxH / img.height);
+      const drawW = img.width * scale;
+      const drawH = img.height * scale;
+      const drawX = (canvas.width - drawW) / 2;
+      const drawY = (canvas.height - drawH) / 2;
+
+      // Rounded photo card
+      drawRoundedBox(drawX, drawY, drawW, drawH, 36);
+      ctx.save();
+      ctx.clip();
+      ctx.drawImage(img, drawX, drawY, drawW, drawH);
+      ctx.restore();
       ctx.filter = "none";
 
       // 4. College Location Badge Render (IPEC Navy/Cyan Theme)
@@ -574,7 +599,7 @@ export default function MainFeedPage() {
         if (error) throw error;
 
         if (data) {
-          setStories((prev) => [data, ...prev]);
+          setStories((prev) => [...prev, data]); // 👈 Nayi story last mein judegi
         }
       } catch (err: any) {
         console.error("Story commit failed:", err.message || err);
@@ -590,12 +615,19 @@ export default function MainFeedPage() {
     };
   };
 
-  // 1. Pehle Grouping aur currentStory calculate karo
+  // 1. Pehle Grouping karo aur stories ko Chronological Order (Oldest -> Newest) mein sort karo
   const storiesByUser = stories.reduce((acc: Record<string, Story[]>, s) => {
     if (!acc[s.author_username]) acc[s.author_username] = [];
     acc[s.author_username].push(s);
     return acc;
   }, {});
+
+  // ✅ Nayi story hamesha purani ke BAAD (Last mein) play hogi
+  Object.keys(storiesByUser).forEach((u) => {
+    storiesByUser[u].sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+    );
+  });
 
   const currentActiveUserStories = activeStoryUsername ? storiesByUser[activeStoryUsername] || [] : [];
   const currentStory = currentActiveUserStories[currentStoryIndex] || null;
@@ -673,7 +705,12 @@ export default function MainFeedPage() {
     "Other violation of IPEC community standards",
   ];
 
-  // Timer: Uses goToNextStory automatically
+  // ✅ 1. Story change hone par progress 0 hogi
+  useEffect(() => {
+    setStoryProgress(0);
+  }, [activeStoryUsername, currentStoryIndex]);
+
+  // ✅ 2. Single 60FPS Butter-Smooth Timer (Duplicate removed, Zero Atakna)
   useEffect(() => {
     if (!activeStoryUsername || !currentStory || isTimerPaused) return;
 
@@ -683,12 +720,13 @@ export default function MainFeedPage() {
           goToNextStory();
           return 0;
         }
-        return prev + 0.42; // ~12 seconds
+        // 40ms mein 0.33% = Exactly 12 Seconds ultra-smooth flow
+        return prev + 0.33;
       });
-    }, 50);
+    }, 40);
 
     return () => clearInterval(interval);
-  }, [activeStoryUsername, currentStoryIndex, currentUserQueueIndex, isTimerPaused, currentActiveUserStories.length]);
+  }, [activeStoryUsername, currentStoryIndex, isTimerPaused, currentActiveUserStories.length]);
 
   // 2. Ab currentStory define ho chuka hai, to isOwnStory check karo
   const isOwnStory = currentStory?.author_username === currentUser?.username;
@@ -1491,14 +1529,6 @@ export default function MainFeedPage() {
                 </div>
               )}
 
-              {/* 2. Campus Badge Preview */}
-              {storyBadge && (
-                <div className="absolute top-16 z-20 px-3.5 py-1.5 rounded-full bg-[#0F2952]/90 border border-[#0284C7]/50 text-[#38BDF8] text-xs font-mono font-bold shadow-lg flex items-center gap-1.5 backdrop-blur-md">
-                  <span>{storyBadge}</span>
-                  <X className="w-3 h-3 cursor-pointer text-white/70 hover:text-white" onClick={() => setStoryBadge(null)} />
-                </div>
-              )}
-
               {/* Debug render log */}
               {(() => {
                 console.log("🎨 [Rendering Canvas Texts]:", {
@@ -1605,7 +1635,82 @@ export default function MainFeedPage() {
                           : "font-sans font-black tracking-tight"
                       }`}
                     >
-                      {item.text}
+                    {item.style === "location" ? (
+                      /* 📍 Tested Pill: Icon 100% white box ke ANDAR + Zero Cutoff */
+                      <div 
+                        style={{
+                          backgroundColor: "#ffffff",
+                          borderRadius: "9999px",
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: "6px 14px",
+                          boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.2)",
+                          border: "1px solid rgba(0,0,0,0.08)",
+                          userSelect: "none",
+                        }}
+                      >
+                        {/* 1. Vector MapPin Icon (White Pill ke andar locked) */}
+                        <svg 
+                          style={{ 
+                            width: "14px", 
+                            height: "14px", 
+                            color: "#0284C7", 
+                            fill: "#0284C7", 
+                            flexShrink: 0, 
+                            marginRight: "6px",
+                            display: "block"
+                          }} 
+                          viewBox="0 0 24 24"
+                        >
+                          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+                        </svg>
+
+                        {/* 2. Gradient Location Text (Lambe se lamba naam bhi bina kate fit aayega) */}
+                        <span 
+                          style={{
+                            fontFamily: "system-ui, -apple-system, sans-serif",
+                            fontWeight: 900,
+                            fontSize: "11px",
+                            letterSpacing: "0.02em",
+                            textTransform: "uppercase",
+                            whiteSpace: "nowrap",
+                            lineHeight: 1,
+                            background: "linear-gradient(to right, #0F2952, #0284C7, #38BDF8)",
+                            WebkitBackgroundClip: "text",
+                            WebkitTextFillColor: "transparent",
+                            display: "inline-block"
+                          }}
+                        >
+                          {item.text}
+                        </span>
+                      </div>
+                    ) : (
+                      <span
+                        style={{ 
+                          lineHeight: 1.35, 
+                          padding: "6px 14px", 
+                          borderRadius: "14px",
+                          WebkitBoxDecorationBreak: "clone",
+                          boxDecorationBreak: "clone" as any,
+                          backgroundColor: (item?.hasBox ?? textHasBox) 
+                            ? (item?.color || selectedTextColor || "#09090b") 
+                            : "transparent",
+                          color: (item?.hasBox ?? textHasBox)
+                            ? ((hex) => {
+                                const h = (hex || "#000000").replace("#", "");
+                                const r = parseInt(h.substring(0, 2), 16) || 0;
+                                const g = parseInt(h.substring(2, 4), 16) || 0;
+                                const b = parseInt(h.substring(4, 6), 16) || 0;
+                                return (r * 299 + g * 587 + b * 114) / 1000 >= 145 ? "#000000" : "#ffffff";
+                              })(item?.color || selectedTextColor || "#09090b")
+                            : (item?.color || selectedTextColor || "#ffffff"),
+                        }}
+                        className={`inline text-center text-xl sm:text-2xl outline-none border-none ring-0 max-w-[85%] break-words whitespace-pre-wrap box-decoration-clone ${getTextStyleClass(item.style)}`}
+                      >
+                        {item.text}
+                      </span>
+                    )}
                     </span>
                   </div>
                 );
@@ -1923,6 +2028,51 @@ export default function MainFeedPage() {
               initialTab={mentionModalTab}
               onClose={() => setIsMentionModalOpen(false)}
               onSelectMention={(mention) => {
+                // 1. Agar existing tag (mention ya location) par click karke edit kiya hai, toh usi ko UPDATE karega
+                if (editingTextId) {
+                  setStoryTexts((prev) =>
+                    prev.map((t) =>
+                      t.id === editingTextId
+                        ? {
+                            ...t,
+                            text: mention.text,
+                            style: mention.style,
+                            hasBox: mention.hasBox ?? t.hasBox,
+                          }
+                        : t
+                    )
+                  );
+                  setEditingTextId(null);
+                  return;
+                }
+
+                // 2. Agar location chuni hai aur pehle se koi location tag hai, toh naya banane ke bajay use REPLACE karega
+                if (mention.style === "location") {
+                  setStoryTexts((prev) => {
+                    const hasLoc = prev.some((t) => t.style === "location");
+                    if (hasLoc) {
+                      return prev.map((t) =>
+                        t.style === "location" ? { ...t, text: mention.text } : t
+                      );
+                    }
+                    return [
+                      ...prev,
+                      {
+                        id: "txt_" + Date.now().toString(),
+                        text: mention.text,
+                        x: 50,
+                        y: 45,
+                        scale: 1,
+                        hasBox: false,
+                        style: "location",
+                        color: "#ffffff",
+                      },
+                    ];
+                  });
+                  return;
+                }
+
+                // 3. Agar naya mention add kiya hai, tabhi naya tag banega
                 const newItem = {
                   id: "txt_" + Date.now().toString(),
                   text: mention.text,
@@ -1935,9 +2085,7 @@ export default function MainFeedPage() {
                 };
                 setStoryTexts((prev) => [...prev, newItem]);
               }}
-              onSelectLocation={(loc) => {
-                setStoryBadge(loc);
-              }}
+              onSelectLocation={() => {}}
             />
 
           </div>
@@ -1957,7 +2105,7 @@ export default function MainFeedPage() {
                 {currentActiveUserStories.map((_, idx) => (
                   <div key={idx} className="h-1 flex-1 bg-white/25 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-white transition-all duration-100 ease-linear rounded-full"
+                      className="h-full bg-white rounded-full transition-[width] duration-75 ease-linear will-change-[width]"
                       style={{
                         width: idx < currentStoryIndex ? "100%" : idx === currentStoryIndex ? `${storyProgress}%` : "0%",
                       }}
@@ -2007,10 +2155,23 @@ export default function MainFeedPage() {
               className="absolute right-0 top-16 bottom-20 w-2/3 z-10 cursor-pointer"
             />
 
-            {/* Uncropped Full Image Display */}
-            <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
-              <img src={currentStory.media_url} alt="Story" className="w-full h-full object-contain" />
-            </div>
+            {/* 📸 Clean Instagram Photo Frame + IPEC Brand Ambient Gradient */}
+            <StoryCanvasViewport
+              imageSrc={editorRawImage}
+              filter={storyFilter}
+              filterToast={filterToast}
+              storyTexts={storyTexts}
+              isDraggingText={isDraggingText}
+              isOverTrash={isOverTrash}
+              isTextEditing={isTextEditing}
+              editingTextId={editingTextId}
+              textHasBox={textHasBox}
+              selectedTextColor={selectedTextColor}
+              authorUsername={currentUser?.username || "ipecapture"}
+              authorAvatar={currentUser?.avatar_url}
+              onDragStart={handleDragText}
+              getTextStyleClass={getTextStyleClass}
+            />
 
             {/* ========================================================= */}
             {/* CONDITIONAL BOTTOM BAR: OWN STORY VS OTHERS' STORY        */}
@@ -2146,6 +2307,30 @@ export default function MainFeedPage() {
                   <div className="absolute inset-0 flex items-center justify-center bg-zinc-950">
                     <img src={currentStory.media_url} alt="Story" className="w-full h-full object-contain" />
                   </div>
+
+                  {/* ========================================================= */}
+                  {/* 👆 INSTAGRAM TAP NAVIGATION (Mobile + Desktop Touch Zones) */}
+                  {/* ========================================================= */}
+                  
+                  {/* 👈 Left 40% Tap Zone: Story peeche karega */}
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      goToPrevStory();
+                    }}
+                    className="absolute left-0 top-20 bottom-20 w-[40%] z-20 cursor-pointer select-none"
+                    aria-label="Previous story"
+                  />
+
+                  {/* 👉 Right 60% Tap Zone: Story aage karega */}
+                  <div
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      goToNextStory();
+                    }}
+                    className="absolute right-0 top-20 bottom-20 w-[60%] z-20 cursor-pointer select-none"
+                    aria-label="Next story"
+                  />
 
                   {/* ========================================================= */}
                   {/* EXACT BOTTOM BAR AS REQUESTED BY USER                     */}

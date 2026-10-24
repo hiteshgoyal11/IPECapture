@@ -33,7 +33,7 @@ export default function StoryMentionModal({
   const [usernameQuery, setUsernameQuery] = useState("");
   const [userSuggestions, setUserSuggestions] = useState<any[]>([]);
   const [locationSearchQuery, setLocationSearchQuery] = useState("");
-  const [hasBox, setHasBox] = useState<boolean>(true);
+  const [boxType, setBoxType] = useState<"none" | "white" | "black">("black");
   const [selectedStyle, setSelectedStyle] = useState<MentionFontStyle>("classic");
   const [isSearching, setIsSearching] = useState<boolean>(false);
   const editableRef = useRef<HTMLSpanElement | null>(null);
@@ -66,24 +66,37 @@ export default function StoryMentionModal({
   }, [isOpen, activeTab]);
 
   // IPEC Campus Verified Locations
+  // 🏛️ Official IPEC Campus Verified Locations & Facilities
   const IPEC_LOCATIONS = [
-    "📍 Nescafe Corner",
-    "📍 Central Lawn",
-    "📍 Maggi Point",
-    "📍 Block A Lab 3",
-    "📍 Library Reading Hall",
-    "📍 Main Auditorium",
-    "📍 Workshop Ground",
-    "📍 Canteen Plaza",
-    "📍 Administrative Block",
-    "📍 Mechanical Block Lawn",
-    "📍 Computer Center Lab 1",
-    "📍 Sports Complex Court",
+    // Academic Buildings & Core
+    { name: "Block-A Academic Building", sub: "Core Classrooms, Labs & Faculty Offices" },
+    { name: "Block-B Academic Building", sub: "Tutorial Rooms & Departmental Labs" },
+    { name: "Block-C Academic Block", sub: "Specialized Labs & Classrooms" },
+    { name: "Central Library", sub: "Digital E-Journals & Reading Zones" },
+    { name: "Main Auditorium & Conference Hall", sub: "Cultural Complex & Placement Seminars" },
+    { name: "Training & Placement Cell", sub: "Corporate Drives & Training Hub" },
+    { name: "Main Reception & Admin Block", sub: "Central Hub & Visitor Services" },
+
+    // Hostels & Accommodation
+    { name: "Boys Hostel Complex", sub: "Buildings 1, 2, 3 Residential Quarters" },
+    { name: "Girls Hostel Complex", sub: "Secure Residential Blocks" },
+    { name: "Campus Guest & Waiting Rooms", sub: "Visiting Parents & Guest Quarters" },
+
+    // Sports & Recreation
+    { name: "Indoor Games Arena", sub: "Billiards, Table Tennis & Badminton Courts" },
+    { name: "Basketball & Sports Ground", sub: "Outdoor Sports Arena" },
+    { name: "Campus Gymnasium", sub: "Well-equipped Fitness Center" },
+
+    // Daily Convenience & Hangouts
+    { name: "Central Dining & Hostel Mess", sub: "In-House Student Mess Facilities" },
+    { name: "Campus Convenience Store", sub: "Daily Essentials & Stationery" },
+    { name: "Nescafe Corner", sub: "Central Campus Plaza" },
+    { name: "Maggi Point", sub: "Student Activity Center" },
   ];
 
-  // Filtered campus locations
   const filteredLocations = IPEC_LOCATIONS.filter((loc) =>
-    loc.toLowerCase().includes(locationSearchQuery.toLowerCase())
+    loc.name.toLowerCase().includes(locationSearchQuery.toLowerCase()) ||
+    loc.sub.toLowerCase().includes(locationSearchQuery.toLowerCase())
   );
 
   // Live Supabase User Search with Debounce
@@ -132,7 +145,7 @@ export default function StoryMentionModal({
   const handlePickUser = (user: any) => {
     onSelectMention({
       text: `@${user.username}`,
-      hasBox: hasBox,
+      hasBox: boxType !== "none",
       style: selectedStyle,
     });
     handleResetAndClose();
@@ -141,8 +154,19 @@ export default function StoryMentionModal({
   // Submit manual custom username
   const handleDoneManualMention = () => handleResetAndClose();
 
-  const handlePickLocation = (loc: string) => {
-    onSelectLocation(loc);
+  // ✅ Location ko onSelectMention se bhejenge taaki storyTexts mein add ho
+  // ✅ Location ko as a White Location Tag bheje ga
+  const handlePickLocation = (loc: any) => {
+    const locName = typeof loc === "string" ? loc : loc.name;
+    const cleanName = locName.replace(/📍/g, "").trim();
+
+    onSelectMention({
+      text: cleanName,
+      hasBox: false,
+      style: "location",
+      color: "#ffffff",
+    } as any);
+
     handleResetAndClose();
   };
 
@@ -242,10 +266,11 @@ export default function StoryMentionModal({
                 borderRadius: "16px",
                 WebkitBoxDecorationBreak: "clone",
                 boxDecorationBreak: "clone",
-                backgroundColor: hasBox ? "#09090b" : "transparent",
+                backgroundColor: boxType === "none" ? "transparent" : boxType === "white" ? "#ffffff" : "#09090b",
+                  color: boxType === "white" ? "#000000" : "#ffffff",
               }}
               className={`inline text-center text-2xl sm:text-3xl font-bold break-words whitespace-pre-wrap [box-decoration-break:clone] [-webkit-box-decoration-break:clone] outline-none border-none ring-0 max-w-[88%] sm:max-w-[82%] transition-all ${
-                hasBox
+                boxType !== "none"
                   ? "text-white shadow-2xl border border-white/15"
                   : "text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.95)] no-underline"
               } ${getFontStyleClass(selectedStyle)}`}
@@ -258,40 +283,66 @@ export default function StoryMentionModal({
           </div>
         ) : (
           /* ========================================================= */
-          /* LOCATION SELECTION WORKSPACE                              */
+          /* LOCATION SELECTION: Pure Black & White Minimal Instagram UI */
           /* ========================================================= */
-          <div className="w-full space-y-3 max-w-sm">
-            {/* Search Input for Locations */}
+          <div className="w-full space-y-3.5 max-w-sm sm:max-w-md mx-auto px-1 animate-in fade-in duration-200">
+            
+            {/* 1. Minimal Search Input */}
             <div className="relative w-full">
-              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+              <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 stroke-[2]" />
               <input
                 type="text"
+                autoFocus
                 value={locationSearchQuery}
                 onChange={(e) => setLocationSearchQuery(e.target.value)}
-                placeholder="Search campus spot..."
-                className="w-full pl-9 pr-4 py-2.5 rounded-xl bg-zinc-900/90 border border-white/10 text-white text-xs placeholder:text-zinc-500 focus:outline-none focus:border-sky-500/60 transition"
+                placeholder="Search location..."
+                className="w-full pl-10 pr-9 py-2.5 rounded-2xl bg-zinc-900 border border-white/10 text-white text-xs sm:text-[13px] placeholder:text-zinc-500 focus:outline-none focus:border-white/30 transition shadow-inner"
               />
+              {locationSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setLocationSearchQuery("")}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
 
-            {/* Location List View */}
-            <div className="w-full space-y-1.5 max-h-72 overflow-y-auto scrollbar-thin pr-1">
+            {/* 2. Location List View (Ugly scrollbar 100% hidden) */}
+            <div className="w-full space-y-1.5 max-h-80 overflow-y-auto scrollbar-none [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden pr-0.5">
               {filteredLocations.length === 0 ? (
-                <div className="py-6 text-center text-xs text-zinc-500 font-mono">
-                  No campus spots matched your search.
+                <div className="py-12 text-center text-xs text-zinc-500 font-mono">
+                  No campus location found.
                 </div>
               ) : (
                 filteredLocations.map((loc) => (
                   <button
-                    key={loc}
+                    key={loc.name}
                     type="button"
-                    onClick={() => handlePickLocation(loc)}
-                    className="w-full p-2.5 rounded-xl bg-zinc-900/70 hover:bg-zinc-800/90 text-left text-xs text-white font-medium flex items-center justify-between transition active:scale-98 border border-white/5 cursor-pointer group"
+                    onClick={() => handlePickLocation(loc.name)}
+                    className="w-full p-3 rounded-2xl bg-zinc-950/80 hover:bg-zinc-900 active:scale-[0.99] text-left flex items-center justify-between transition-all border border-white/5 hover:border-white/10 cursor-pointer group select-none"
                   >
-                    <div className="flex items-center gap-2">
-                      <MapPin className="w-3.5 h-3.5 text-sky-400 opacity-80 group-hover:opacity-100 shrink-0" />
-                      <span className="truncate">{loc.replace("📍 ", "")}</span>
+                    {/* Left: Clean Location Pin + Name + Subtitle */}
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-white/10 border border-white/15 flex items-center justify-center shrink-0 group-hover:bg-white group-hover:text-black transition-colors">
+                        {/*Photo wala exact Solid Pin with Center Circle (Pure White Vector Icon) */}
+                        <svg className="w-4 h-4 text-white group-hover:text-black fill-current" viewBox="0 0 24 24">
+                          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z" />
+                        </svg>
+                      </div>
+                      <div className="truncate">
+                        <p className="text-xs sm:text-[13px] font-semibold text-white tracking-tight leading-tight truncate">
+                          {loc.name}
+                        </p>
+                        <p className="text-[10px] sm:text-[11px] text-zinc-400 font-normal leading-tight truncate mt-0.5">
+                          {loc.sub}
+                        </p>
+                      </div>
                     </div>
-                    <Check className="w-3.5 h-3.5 text-sky-400 opacity-60 group-hover:opacity-100 shrink-0" />
+
+                    {/* Right: Minimal Check Indicator */}
+                    <Check className="w-4 h-4 text-zinc-400 opacity-40 group-hover:opacity-100 group-hover:text-white transition-opacity shrink-0 ml-2" />
                   </button>
                 ))
               )}
@@ -357,43 +408,50 @@ export default function StoryMentionModal({
           </div>
         )}
 
-        {/* ========================================================================= */}
-        {/* 🛠️ BOTTOM PILL BAR: [A] Box Toggle + 7 Instagram Fonts (Adaptive Screen)    */}
-        {/* ========================================================================= */}
+        {/* 🛠️ BOTTOM PILL BAR: Screen ke center mein lock, dono taraf exact barabar curve */}
         {activeTab === "mention" && (
-          <div className="w-fit max-w-[94%] sm:max-w-md md:max-w-lg mx-auto px-2.5 sm:px-3.5 py-1.5 rounded-full bg-[#262626]/90 dark:bg-zinc-900/90 backdrop-blur-2xl border border-white/15 dark:border-white/10 shadow-2xl flex items-center gap-1.5 sm:gap-2.5 overflow-x-auto scrollbar-none transition-all">
-            
-            {/* [A] Background Box Toggle Button */}
-            <button
-              type="button"
-              title="Toggle Background Box"
-              onClick={() => setHasBox(!hasBox)}
-              className={`w-7 h-7 shrink-0 ml-0.5 rounded-[7px] flex items-center justify-center transition-all duration-150 active:scale-90 select-none box-border cursor-pointer ${
-                hasBox
-                  ? "bg-white text-zinc-950 font-bold shadow-md"
-                  : "border-[2px] border-white text-white bg-transparent"
-              }`}
+          <div className="w-full flex items-center justify-center px-4 select-none">
+            <div
+              onWheel={(e) => { e.currentTarget.scrollLeft += e.deltaY; }}
+              className="flex items-center gap-2 overflow-x-auto scrollbar-none py-1 px-2.5 touch-pan-x"
             >
-              <span className="font-sans font-bold text-xs sm:text-[13px] leading-none">A</span>
-            </button>
-
-            <div className="h-4 w-[1px] bg-white/20 shrink-0" />
-
-            {/* Font Style Selectors */}
-            {(["classic", "modern", "signature", "editor", "poster", "bubble", "typewriter"] as const).map((m) => (
+              {/* [A] Background Box Toggle Button */}
               <button
-                key={m}
                 type="button"
-                onClick={() => setSelectedStyle(m)}
-                className={`text-[11px] font-bold px-3 py-1 rounded-full capitalize shrink-0 transition-all cursor-pointer ${
-                  selectedStyle === m
-                    ? "bg-white text-zinc-950 shadow-sm scale-100"
-                    : "text-zinc-300 hover:text-white active:scale-95"
+                title="Toggle Background (Black / White / None)"
+                onClick={() => setBoxType((prev) => (prev === "black" ? "white" : prev === "white" ? "none" : "black"))}
+                className={`w-7 h-7 shrink-0 ml-0.5 rounded-[7px] flex items-center justify-center transition-all duration-150 active:scale-90 select-none box-border cursor-pointer ${
+                  boxType === "white"
+                    ? "bg-white text-zinc-950 font-bold shadow-md"
+                    : boxType === "black"
+                    ? "bg-zinc-950 text-white font-bold border border-white/50 shadow-md"
+                    : "border-[2px] border-white text-white bg-transparent"
                 }`}
               >
-                {m}
+                <span className="font-sans font-bold text-xs sm:text-[13px] leading-none">A</span>
               </button>
-            ))}
+
+              <div className="h-4 w-[1px] bg-white/20 shrink-0" />
+
+              {/* Font Style Selectors */}
+              {(["classic", "modern", "signature", "editor", "poster", "bubble", "typewriter"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setSelectedStyle(m)}
+                  className={`text-[11px] font-bold px-3 py-1 rounded-full capitalize shrink-0 transition-all cursor-pointer ${
+                    selectedStyle === m
+                      ? "bg-white text-zinc-950 shadow-sm scale-100"
+                      : "text-zinc-300 hover:text-white active:scale-95"
+                  }`}
+                >
+                  {m}
+                </button>
+              ))}
+
+              {/* Right edge spacer */}
+              <div className="w-2.5 shrink-0" />
+            </div>
           </div>
         )}
 
