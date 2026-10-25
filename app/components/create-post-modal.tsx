@@ -5,6 +5,7 @@ import { X, ArrowLeft, Loader2 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import PostCropScreen, { AspectRatioType } from "./post-crop-screen";
 import PostEditScreen from "./post-edit-screen";
+import PostDetailsScreen from "./post-details-screen";
 
 interface CreatePostModalProps {
   isOpen: boolean;
@@ -34,6 +35,7 @@ export default function CreatePostModal({
   }>({ aspectRatio: "1:1", zoom: 1, pan: { x: 0, y: 0 } });
 
   const [caption, setCaption] = useState("");
+  const [detailsConfig, setDetailsConfig] = useState<any>(null);
   // 🎯 Discard Confirmation Modal State
   const [isDiscardModalOpen, setIsDiscardModalOpen] = useState(false);
 
@@ -135,8 +137,12 @@ export default function CreatePostModal({
         author_avatar: currentUser?.avatar_url || null,
         media_url: publicUrlData.publicUrl,
         media_type: selectedFile.type.startsWith("video/") ? "video" : "image",
-        caption: caption.trim() || "Campus Moment",
-        location: "IPEC Campus, Ghaziabad",
+        caption: caption.trim() || "",
+        location: detailsConfig?.location || "IPEC Campus, Ghaziabad",
+        tagged_users: detailsConfig?.taggedUsers || [],
+        is_ai_label: detailsConfig?.isAiLabel || false,
+        hide_likes: detailsConfig?.hideLikes || false,
+        comments_disabled: detailsConfig?.commentsDisabled || false,
         course: currentUser?.course || "B.Tech",
         semester: currentUser?.semester || "Sem 3",
         type: "meme",
@@ -291,100 +297,23 @@ export default function CreatePostModal({
         )}
 
         {/* ======================================================== */}
-        {/* SCREEN 3: CAPTION & SHARE DETAILS                        */}
+        {/* SCREEN 4: POST DETAILS, TAGGING & ADVANCED SETTINGS     */}
         {/* ======================================================== */}
         {step === "details" && previewUrl && (
-          <div className="flex flex-col w-full h-full bg-white dark:bg-zinc-950">
-            <header className="h-12 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between px-4 bg-zinc-50/50 dark:bg-zinc-900/40">
-              <button
-                type="button"
-                disabled={isUploading}
-                onClick={() => setStep("crop")}
-                className="text-zinc-700 dark:text-zinc-300 hover:text-black dark:hover:text-white transition p-1 cursor-pointer"
-              >
-                <ArrowLeft className="w-5 h-5 stroke-[2]" />
-              </button>
-
-              <h2 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-                Create new post
-              </h2>
-
-              <button
-                type="button"
-                disabled={isUploading}
-                onClick={handlePublishPost}
-                className="text-xs font-bold text-zinc-900 dark:text-zinc-100 hover:text-zinc-600 dark:hover:text-zinc-300 transition flex items-center gap-1.5 cursor-pointer"
-              >
-                {isUploading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                <span>Share</span>
-              </button>
-            </header>
-
-            <div className="flex flex-col sm:flex-row min-h-[380px] sm:min-h-[440px] overflow-hidden">
-              <div className="flex-1 bg-black flex items-center justify-center overflow-hidden p-2 border-b sm:border-b-0 sm:border-r border-zinc-200 dark:border-zinc-800 min-h-[280px]">
-                <div
-                  style={{
-                    aspectRatio:
-                      cropConfig.aspectRatio === "4:5"
-                        ? "4 / 5"
-                        : cropConfig.aspectRatio === "16:9"
-                        ? "16 / 9"
-                        : cropConfig.aspectRatio === "1:1"
-                        ? "1 / 1"
-                        : undefined,
-                    maxWidth: "100%",
-                    maxHeight: "100%",
-                    width: cropConfig.aspectRatio === "16:9" ? "100%" : "auto",
-                    height: cropConfig.aspectRatio === "4:5" || cropConfig.aspectRatio === "1:1" ? "100%" : "auto",
-                  }}
-                  className="relative flex items-center justify-center overflow-hidden"
-                >
-                  <img
-                    src={previewUrl}
-                    alt="Post preview"
-                    draggable={false}
-                    style={{
-                      filter: computedCssFilter,
-                      transform: `translate(${cropConfig.pan.x}px, ${cropConfig.pan.y}px) scale(${cropConfig.zoom})`,
-                    }}
-                    className={`w-full h-full pointer-events-none ${
-                      cropConfig.aspectRatio === "original" ? "object-contain" : "object-cover"
-                    }`}
-                  />
-                </div>
-              </div>
-
-              <div className="w-full sm:w-[240px] p-4 flex flex-col justify-between bg-white dark:bg-zinc-950 space-y-4">
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-full bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center text-xs font-bold uppercase overflow-hidden text-zinc-900 dark:text-zinc-100">
-                      {currentUser?.avatar_url ? (
-                        <img src={currentUser.avatar_url} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        currentUser?.full_name?.charAt(0) || "U"
-                      )}
-                    </div>
-                    <span className="text-xs font-bold text-zinc-900 dark:text-zinc-100 truncate">
-                      {currentUser?.username || "ipec_student"}
-                    </span>
-                  </div>
-
-                  <textarea
-                    value={caption}
-                    onChange={(e) => setCaption(e.target.value)}
-                    placeholder="Write a caption..."
-                    rows={4}
-                    className="w-full text-xs bg-transparent border-0 focus:outline-none focus:ring-0 resize-none text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 scrollbar-none"
-                  />
-                </div>
-
-                <div className="border-t border-zinc-200 dark:border-zinc-800 pt-3 text-[11px] text-zinc-500 font-mono space-y-1">
-                  <p>Location: IPEC Campus</p>
-                  <p>Target: {currentUser?.course || "B.Tech"} Students</p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <PostDetailsScreen
+            imageSrc={previewUrl}
+            cropConfig={cropConfig}
+            computedCssFilter={computedCssFilter}
+            currentUser={currentUser}
+            caption={caption}
+            setCaption={setCaption}
+            onBack={() => setStep("edit")}
+            isUploading={isUploading}
+            onPublish={(details) => {
+              setDetailsConfig(details);
+              setTimeout(() => handlePublishPost(), 50);
+            }}
+          />
         )}
       </div>
 
