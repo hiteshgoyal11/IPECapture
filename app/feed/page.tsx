@@ -36,6 +36,7 @@ import StoryCanvasViewport from "./components/story-canvas-viewport";
 import UserAvatar from "./components/user-avatar";
 import { supabase } from "../../lib/supabase";
 import StoryMentionModal from "./components/story-mention-modal";
+import CreatePostModal from "../components/create-post-modal";
 
 export type TextStyleType = 
   | "classic" | "boxed" | "neon" | "gradient" | "typewriter" 
@@ -78,6 +79,7 @@ export default function MainFeedPage() {
     const brightness = (r * 299 + g * 587 + b * 114) / 1000;
     return brightness >= 145 ? "#000000" : "#ffffff";
   };
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   // Open editor for a brand new text
   const handleAddNewText = () => {
     // handleAddNewText me:
@@ -1240,7 +1242,17 @@ export default function MainFeedPage() {
       )}
 
       {/* 1. Left Expandable Sidebar (Desktop) */}
-      <LeftSidebar currentTab={currentNavTab} onTabChange={setCurrentNavTab} unreadCount={2} />
+      <LeftSidebar
+        currentTab={currentNavTab}
+        onTabChange={(tab) => {
+          if (tab === "create" || tab === "upload") {
+            setIsCreateModalOpen(true);
+          } else {
+            setCurrentNavTab(tab);
+          }
+        }}
+        unreadCount={2}
+      />
 
       {/* Main Layout Container */}
       <div className="w-full max-w-7xl flex justify-between md:pl-16 group-hover:md:pl-60 transition-all duration-300">
@@ -1592,8 +1604,24 @@ export default function MainFeedPage() {
 
         </main>
 
-        {/* 3. Right Sidebar (Gradient ring passed conditionally) */}
-        <RightSidebar notices={notices} currentUser={currentUser} userHasActiveStory={userHasActiveStory} />
+        {/* 3. Right Sidebar (Suggested ke barabar wala scrollbar 100% hidden, scrolling smooth rahegi) */}
+        <div id="right-sidebar-wrapper">
+          <style>{`
+            #right-sidebar-wrapper,
+            #right-sidebar-wrapper *,
+            #right-sidebar-wrapper *::-webkit-scrollbar {
+              scrollbar-width: none !important;
+              -ms-overflow-style: none !important;
+            }
+            #right-sidebar-wrapper::-webkit-scrollbar,
+            #right-sidebar-wrapper *::-webkit-scrollbar {
+              display: none !important;
+              width: 0 !important;
+              height: 0 !important;
+            }
+          `}</style>
+          <RightSidebar notices={notices} currentUser={currentUser} userHasActiveStory={userHasActiveStory} />
+        </div>
 
       </div>
 
@@ -2897,14 +2925,22 @@ export default function MainFeedPage() {
               </div>
             )}
 
-                </div>
-              </div>
-            )}
+          </div>
+        </div>
+      )}
 
-        {/* 4. Mobile Bottom Navigation */}
-        {!activeStoryUsername && (
-          <MobileNav currentTab={currentNavTab} onTabChange={setCurrentNavTab} unreadCount={2} />
-        )}
+      {/* 5. Instagram Style Create Post Modal */}
+      <CreatePostModal
+        isOpen={isCreateModalOpen}
+        onClose={() => setIsCreateModalOpen(false)}
+        currentUser={currentUser}
+        onPostCreated={(newPost) => setPosts((prev) => [newPost, ...prev])}
+      />
+
+      {/* 4. Mobile Bottom Navigation */}
+      {!activeStoryUsername && (
+        <MobileNav currentTab={currentNavTab} onTabChange={setCurrentNavTab} unreadCount={2} />
+      )}
 
     </div>
   );

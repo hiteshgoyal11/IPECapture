@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import StepIndicator from "./components/step-indicator";
 import Step1NameDob from "./components/step-1-name-dob";
