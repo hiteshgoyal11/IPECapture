@@ -131,24 +131,30 @@ export default function CreatePostModal({
         .from("post-media")
         .getPublicUrl(filePath);
 
-      const newPostPayload = {
-        author_name: currentUser?.full_name || "IPEC Student",
-        author_username: currentUser?.username || "ipec_student",
+      const newPostPayload: any = {
+        author_name: currentUser?.full_name || "",
+        author_username: currentUser?.username || "",
         author_avatar: currentUser?.avatar_url || null,
         media_url: publicUrlData.publicUrl,
-        media_type: selectedFile.type.startsWith("video/") ? "video" : "image",
-        caption: caption.trim() || "",
-        location: detailsConfig?.location || "IPEC Campus, Ghaziabad",
-        tagged_users: detailsConfig?.taggedUsers || [],
-        is_ai_label: detailsConfig?.isAiLabel || false,
-        hide_likes: detailsConfig?.hideLikes || false,
-        comments_disabled: detailsConfig?.commentsDisabled || false,
-        course: currentUser?.course || "B.Tech",
-        semester: currentUser?.semester || "Sem 3",
+        caption: caption.trim(),
+        location: detailsConfig?.location || null,
+        course: currentUser?.course || null,
+        semester: currentUser?.semester || null,
         type: "meme",
         likes_count: 0,
         comments_count: 0,
       };
+
+      // Only attach if present
+      if (detailsConfig?.taggedUsers?.length > 0) {
+        newPostPayload.tagged_users = detailsConfig.taggedUsers;
+      }
+      if (detailsConfig?.hideLikes !== undefined) {
+        newPostPayload.hide_likes = detailsConfig.hideLikes;
+      }
+      if (detailsConfig?.commentsDisabled !== undefined) {
+        newPostPayload.comments_disabled = detailsConfig.commentsDisabled;
+      }
 
       const { data: insertedPost, error: insertError } = await supabase
         .from("posts")

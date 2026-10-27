@@ -1529,20 +1529,23 @@ export default function MainFeedPage() {
                     <span className="text-[10px] font-mono text-zinc-400">2h ago</span>
                   </div>
 
-                  {/* POST CONTENT: TYPE A - MEME / CAMPUS MOMENT */}
-                  {post.type === "meme" && (
-                    <div className="space-y-3">
-                      <div className="px-4 text-xs sm:text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed">
+                  {/* REAL POST CONTENT (Zero Dummy Data) */}
+                  <div className="space-y-3">
+                    {post.caption && (
+                      <div className="px-4 text-xs sm:text-sm text-zinc-800 dark:text-zinc-200 leading-relaxed whitespace-pre-wrap">
                         {post.caption}
                       </div>
-                      <div className="h-64 sm:h-72 w-full bg-zinc-100 dark:bg-zinc-900 flex flex-col items-center justify-center p-6 text-center border-y border-zinc-100 dark:border-zinc-900">
-                        <span className="font-mono text-xs text-zinc-400 mb-2">[ Campus Life Photograph / Meme ]</span>
-                        <p className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 max-w-sm italic">
-                          &ldquo;Attendance 74.9% vs ERP portal sessional admit card gatekeeper&rdquo;
-                        </p>
+                    )}
+                    {post.media_url && (
+                      <div className="w-full bg-black flex items-center justify-center overflow-hidden max-h-[580px] border-y border-zinc-100 dark:border-zinc-900">
+                        <img
+                          src={post.media_url}
+                          alt="Post upload"
+                          className="w-full h-auto object-contain max-h-[580px]"
+                        />
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
 
                   {/* POST CONTENT: TYPE B - ACADEMIC SOLVED PAPER */}
                   {post.type === "academic" && (
@@ -1604,8 +1607,11 @@ export default function MainFeedPage() {
 
         </main>
 
-        {/* 3. Right Sidebar (Suggested ke barabar wala scrollbar 100% hidden, scrolling smooth rahegi) */}
-        <div id="right-sidebar-wrapper">
+        {/* 3. Right Sidebar (Fixed on right, Zero shift on center feed & Skeleton) */}
+        <div 
+          id="right-sidebar-wrapper" 
+          className="hidden xl:block fixed right-6 2xl:right-16 top-4 w-[320px] 2xl:w-[340px] z-10"
+        >
           <style>{`
             #right-sidebar-wrapper,
             #right-sidebar-wrapper *,
